@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Console from "./Console.jsx";
+import ChatPanel from "./ChatPanel.jsx";
 
 const WS_URL =
   (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
@@ -10,14 +11,19 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [clip, setClip] = useState(false);
-  const [approval, setApproval] = useState(null); // {id, payload}
-  const [final, setFinal] = useState(null); // {report, deepReport, offerDeep, answer}
-  const [notice, setNotice] = useState(null); // {kind, text}
-  const [query, setQuery] = useState(null); // what the current run is about
+  const [approval, setApproval] = useState(null);
+  const [final, setFinal] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState([]);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("netops-theme") || "dark",
   );
   const wsRef = useRef(null);
+  // where the in-flight turn came from: "run" (form / deep button) or "chat".
+  // Only one turn runs at a time (the backend rejects a second), so a single
+  // ref is enough.
+  const originRef = useRef("run");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -53,9 +59,11 @@ export default function App() {
             setBusy(true);
             setNotice(null);
             setApproval(null);
-            const deep = msg.text === "Run deeper checks";
-            setQuery(msg.text);
-            if (!deep) setFinal(null); // a deep turn extends the current report
+            if (originRef.current === "chat") {
+              setChatMsgs((prev) => [...prev, { role: "user", text: msg.text }]);
+            } else if (msg.text !== "Run deeper checks") {
+              setFinal(null); // a new run clears the report; a deep turn extends it
+            }
             break;
           }
           case "status":
@@ -72,24 +80,44 @@ export default function App() {
           case "rejected":
             setNotice({ kind: "info", text: `Rejected: ${msg.command}` });
             break;
-          case "final":
+          case "final": {
             setBusy(false);
             setApproval(null);
-            setFinal((prev) =>
-              msg.is_deep
-                ? { ...(prev || {}), deepReport: msg.report, offerDeep: false }
-                : {
-                    report: msg.report,
-                    answer: msg.answer,
-                    offerDeep: msg.offer_deep,
-                    deepReport: null,
-                  },
-            );
+            const rep = msg.report || {};
+            const structured = !!(rep.result || rep.source || rep.destination);
+            if (originRef.current === "chat") {
+              const text = structured
+                ? `${rep.result || "done"} — the full report is on the left.`
+                : String((rep.text ?? msg.answer) || "(no answer)");
+              setChatMsgs((prev) => [...prev, { role: "agent", text }]);
+            }
+            // a structured report always lands on the main area, wherever the
+            // question came from; a plain chat answer never overwrites it
+            if (originRef.current !== "chat" || structured) {
+              setFinal((prev) =>
+                msg.is_deep
+                  ? { ...(prev || {}), deepReport: msg.report, offerDeep: false }
+                  : {
+                      report: msg.report,
+                      answer: msg.answer,
+                      offerDeep: msg.offer_deep,
+                      deepReport: null,
+                    },
+              );
+            }
             break;
+          }
           case "error":
             setBusy(false);
             setApproval(null);
-            setNotice({ kind: "err", text: msg.message });
+            if (originRef.current === "chat") {
+              setChatMsgs((prev) => [
+                ...prev,
+                { role: "agent", text: `⚠ ${msg.message}` },
+              ]);
+            } else {
+              setNotice({ kind: "err", text: msg.message });
+            }
             break;
           default:
             break;
@@ -110,24 +138,27 @@ export default function App() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }, []);
 
-  const sendChat = useCallback(
+  const runFromForm = useCallback(
     (text) => {
       if (!text.trim() || busy) return;
+      originRef.current = "run";
       send({ type: "chat", text: text.trim() });
     },
     [busy, send],
   );
 
-  const answerApproval = useCallback(
-    (id, approved) => {
-      send({ type: "approval", id, approved });
-      setApproval(null);
+  const askFromChat = useCallback(
+    (text) => {
+      if (!text.trim() || busy) return;
+      originRef.current = "chat";
+      send({ type: "chat", text: text.trim() });
     },
-    [send],
+    [busy, send],
   );
 
   const runDeep = useCallback(() => {
     if (busy) return;
+    originRef.current = "run";
     send({ type: "deep_check" });
   }, [busy, send]);
 
@@ -185,6 +216,13 @@ export default function App() {
         {clip && <span className="pill">clipboard relay</span>}
         <div className="spacer" />
         <button
+          className={`chat-btn ${chatOpen ? "on" : ""}`}
+          title="Ask questions about the current run"
+          onClick={() => setChatOpen(!chatOpen)}
+        >
+          💬 Chat
+        </button>
+        <button
           className="icon-btn"
           title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -192,19 +230,32 @@ export default function App() {
           {theme === "dark" ? "☀" : "🌙"}
         </button>
       </div>
-      <Console
-        wf={wf}
-        busy={busy}
-        clip={clip}
-        status={status}
-        approval={approval}
-        final={final}
-        notice={notice}
-        query={query}
-        onRun={sendChat}
-        onApproval={answerApproval}
-        onDeep={runDeep}
-      />
+      <div className="body-row">
+        <Console
+          wf={wf}
+          busy={busy}
+          clip={clip}
+          status={status}
+          approval={approval}
+          final={final}
+          notice={notice}
+          onRun={runFromForm}
+          onApproval={(id, ok) => {
+            send({ type: "approval", id, approved: ok });
+            setApproval(null);
+          }}
+          onDeep={runDeep}
+        />
+        {chatOpen && (
+          <ChatPanel
+            msgs={chatMsgs}
+            busy={busy}
+            clip={clip}
+            onAsk={askFromChat}
+            onClose={() => setChatOpen(false)}
+          />
+        )}
+      </div>
     </div>
   );
 }

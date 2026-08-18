@@ -281,6 +281,11 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         r"\b(device\s*detail|cmdb|look\s*up|lookup|fetch|inventory)\w*\b",
         text, re.I))
 
+    # A plain question is not a workflow turn: it must not reset the panel on
+    # the way in, nor mark its stages skipped on the way out. Otherwise asking
+    # "why is it blocked?" rewrites the timeline of the run being asked about.
+    workflow_turn = show_commands or wants_path or wants_lookup
+
     if show_commands:
         wf.checks = []
         await sess.push_wf()
@@ -323,7 +328,7 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         await sess.send({"type": "error", "message": str(e)})
         return
 
-    if not show_commands:
+    if workflow_turn and not show_commands:
         down = ", ".join(net_agent.LAST_FAILED_SERVERS) or ""
         why = (f"skipped - {down} MCP unavailable" if down
                else "not run - the agent concluded before this step")
@@ -339,7 +344,8 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         state["messages"][-1].content if state.get("messages") else "")
 
     parsed = as_report(answer)
-    if parsed:
+    if parsed and workflow_turn:
+        # a question's answer belongs in the chat, not in the run's report
         if show_commands:
             wf.deep_report = parsed
         else:
@@ -348,7 +354,8 @@ async def run_turn(sess: Session, text: str, show_commands=False):
 
     ping_ok = state.get("ping_ok")
     unresolved = ping_ok is False or not (state.get("hops") or [])
-    offer = (wf.scope == "path" and unresolved and not show_commands
+    offer = (workflow_turn and wf.scope == "path" and unresolved
+             and not show_commands
              and not wf.local)          # no device to dig into on a local run
 
     await sess.status("idle")

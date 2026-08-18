@@ -264,8 +264,12 @@ def as_report(text: str):
         try:
             d = json.loads(body)
             if isinstance(d, dict):
-                if "final" in d and isinstance(d["final"], dict):
-                    d = d["final"]
+                # The relay unwraps {"thought":.., "final":..} itself, but an
+                # API model handed the same schema often returns the whole
+                # envelope -- and then the raw JSON was shown as the answer.
+                if "final" in d:
+                    inner = d["final"]
+                    return inner if isinstance(inner, dict) else {"text": str(inner)}
                 return d
         except Exception:
             pass
