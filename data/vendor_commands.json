@@ -1,0 +1,157 @@
+{
+  "_meta": {
+    "purpose": "ping + traceroute command registry keyed by OS family (not per-model). ~10k models collapse to these CLI dialects.",
+    "placeholders": { "{dest}": "destination IP/host", "{count}": "ping probe count", "{maxhops}": "traceroute max TTL/hops" },
+    "usage": "Map CMDB vendor/os -> os_family key -> format command_tmpl. Prefer netmiko device_type for connection + use_textfsm parsing.",
+    "warning": "LAB-VERIFY each command on a real device before trusting in production. Options syntax varies by OS version.",
+    "parse": "prefer ntc-templates TextFSM via netmiko use_textfsm; regex fallback: extract IPs with \\d+\\.\\d+\\.\\d+\\.\\d+"
+  },
+
+  "cisco_ios": {
+    "vendor": "cisco", "netmiko_device_type": "cisco_ios",
+    "ping": "ping {dest} repeat {count}",
+    "traceroute": "traceroute {dest} ttl 1 {maxhops} timeout 1 probe 1",
+    "notes": "IOS / IOS-XE. Numeric hops unless DNS configured."
+  },
+  "cisco_nxos": {
+    "vendor": "cisco", "netmiko_device_type": "cisco_nxos",
+    "ping": "ping {dest} count {count}",
+    "traceroute": "traceroute {dest}",
+    "notes": "NX-OS. maxhops not a simple flag."
+  },
+  "cisco_xr": {
+    "vendor": "cisco", "netmiko_device_type": "cisco_xr",
+    "ping": "ping {dest} count {count}",
+    "traceroute": "traceroute {dest}",
+    "notes": "IOS-XR."
+  },
+  "cisco_asa": {
+    "vendor": "cisco", "netmiko_device_type": "cisco_asa",
+    "ping": "ping {dest}",
+    "traceroute": "traceroute {dest}",
+    "notes": "ASA. Count is interactive; base form used."
+  },
+  "arista_eos": {
+    "vendor": "arista", "netmiko_device_type": "arista_eos",
+    "ping": "ping {dest} repeat {count}",
+    "traceroute": "traceroute {dest}",
+    "notes": "EOS is Linux-based; also supports 'bash traceroute -m {maxhops} {dest}'."
+  },
+  "juniper_junos": {
+    "vendor": "juniper", "netmiko_device_type": "juniper_junos",
+    "ping": "ping {dest} count {count}",
+    "traceroute": "traceroute {dest} ttl {maxhops}",
+    "notes": "Junos. 'ping ... rapid' for fast."
+  },
+  "fortinet_fortios": {
+    "vendor": "fortinet", "netmiko_device_type": "fortinet",
+    "ping": "execute ping {dest}",
+    "ping_count_setup": "execute ping-options repeat-count {count}",
+    "traceroute": "execute traceroute {dest}",
+    "notes": "Set repeat-count via execute ping-options BEFORE execute ping. execute traceroute-options for tuning."
+  },
+  "paloalto_panos": {
+    "vendor": "paloalto", "netmiko_device_type": "paloalto_panos",
+    "ping": "ping count {count} host {dest}",
+    "traceroute": "traceroute host {dest}",
+    "notes": "PAN-OS operational mode. 'maxttl' option available on traceroute in some versions."
+  },
+  "checkpoint_gaia": {
+    "vendor": "checkpoint", "netmiko_device_type": "checkpoint_gaia",
+    "ping": "ping {dest} -c {count}",
+    "traceroute": "traceroute -m {maxhops} {dest}",
+    "notes": "Gaia clish / expert (Linux). On Chassis/multi-blade use 'asg_tracert' instead."
+  },
+  "citrix_netscaler": {
+    "vendor": "citrix", "netmiko_device_type": "netscaler",
+    "ping": "ping -c {count} {dest}",
+    "traceroute": "traceroute -m {maxhops} {dest}",
+    "notes": "NetScaler ADC invokes UNIX ping/traceroute. -M min-ttl / -m max-ttl. Run from shell."
+  },
+  "f5_tmos": {
+    "vendor": "f5", "netmiko_device_type": "f5_tmsh",
+    "ping": "ping -c {count} {dest}",
+    "traceroute": "traceroute -m {maxhops} {dest}",
+    "ping_tmsh": "run /util ping -c {count} {dest}",
+    "traceroute_tmsh": "run /util traceroute -m {maxhops} {dest}",
+    "notes": "BIG-IP: bash form or tmsh 'run /util ...'."
+  },
+  "gigamon_gigavue": {
+    "vendor": "gigamon", "netmiko_device_type": "generic",
+    "ping": "ping {dest}",
+    "traceroute": "traceroute -m {maxhops} {dest}",
+    "notes": "GigaVUE-OS traceroute uses Linux-style options ( -m max_ttl, host ). Enable mode required."
+  },
+  "aruba_os_switch": {
+    "vendor": "hpe_aruba", "netmiko_device_type": "hp_procurve",
+    "ping": "ping {dest} repetitions {count}",
+    "traceroute": "traceroute {dest} maxttl {maxhops}",
+    "notes": "ArubaOS-Switch / ProCurve."
+  },
+  "aruba_oscx": {
+    "vendor": "hpe_aruba", "netmiko_device_type": "aruba_oscx",
+    "ping": "ping {dest} repetitions {count}",
+    "traceroute": "traceroute {dest} maxttl {maxhops}",
+    "notes": "ArubaOS-CX."
+  },
+  "hp_comware": {
+    "vendor": "hpe", "netmiko_device_type": "hp_comware",
+    "ping": "ping -c {count} {dest}",
+    "traceroute": "tracert {dest}",
+    "notes": "HPE Comware (H3C lineage)."
+  },
+  "huawei_vrp": {
+    "vendor": "huawei", "netmiko_device_type": "huawei",
+    "ping": "ping -c {count} {dest}",
+    "traceroute": "tracert {dest}",
+    "notes": "VRP. 'tracert' not 'traceroute'."
+  },
+  "nokia_sros": {
+    "vendor": "nokia", "netmiko_device_type": "nokia_sros",
+    "ping": "ping {dest} count {count}",
+    "traceroute": "traceroute {dest}",
+    "notes": "SR OS."
+  },
+  "dell_os10": {
+    "vendor": "dell", "netmiko_device_type": "dell_os10",
+    "ping": "ping -c {count} {dest}",
+    "traceroute": "traceroute {dest}",
+    "notes": "Dell OS10 (Linux-based)."
+  },
+  "dell_os9_ftos": {
+    "vendor": "dell", "netmiko_device_type": "dell_force10",
+    "ping": "ping {dest}",
+    "traceroute": "traceroute {dest}",
+    "notes": "Dell OS9 / FTOS."
+  },
+  "extreme_exos": {
+    "vendor": "extreme", "netmiko_device_type": "extreme_exos",
+    "ping": "ping count {count} {dest}",
+    "traceroute": "traceroute {dest}",
+    "notes": "EXOS."
+  },
+  "brocade_fastiron": {
+    "vendor": "brocade_ruckus", "netmiko_device_type": "brocade_fastiron",
+    "ping": "ping {dest}",
+    "traceroute": "traceroute {dest}",
+    "notes": "Brocade/Ruckus ICX FastIron."
+  },
+  "mikrotik_routeros": {
+    "vendor": "mikrotik", "netmiko_device_type": "mikrotik_routeros",
+    "ping": "/ping {dest} count={count}",
+    "traceroute": "/tool traceroute {dest} count={count}",
+    "notes": "RouterOS uses key=value; traceroute is continuous, needs count= to stop."
+  },
+  "vyos": {
+    "vendor": "vyos", "netmiko_device_type": "vyos",
+    "ping": "ping {dest} count {count}",
+    "traceroute": "traceroute {dest}",
+    "notes": "VyOS."
+  },
+  "linux": {
+    "vendor": "linux", "netmiko_device_type": "linux",
+    "ping": "ping -c {count} {dest}",
+    "traceroute": "traceroute -m {maxhops} {dest}",
+    "notes": "Generic Linux host / server. Fallback for unknown Linux-based NOS."
+  }
+}
