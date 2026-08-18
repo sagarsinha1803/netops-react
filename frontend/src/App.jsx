@@ -16,6 +16,7 @@ export default function App() {
   const [notice, setNotice] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);
+  const [deepRunning, setDeepRunning] = useState(false);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("netops-theme") || "dark",
   );
@@ -83,6 +84,7 @@ export default function App() {
           case "final": {
             setBusy(false);
             setApproval(null);
+            if (msg.is_deep) setDeepRunning(false);
             const rep = msg.report || {};
             const structured = !!(rep.result || rep.source || rep.destination);
             if (originRef.current === "chat") {
@@ -110,6 +112,7 @@ export default function App() {
           case "error":
             setBusy(false);
             setApproval(null);
+            setDeepRunning(false);
             if (originRef.current === "chat") {
               setChatMsgs((prev) => [
                 ...prev,
@@ -159,6 +162,7 @@ export default function App() {
   const runDeep = useCallback(() => {
     if (busy) return;
     originRef.current = "run";
+    setDeepRunning(true);
     send({ type: "deep_check" });
   }, [busy, send]);
 
@@ -239,6 +243,7 @@ export default function App() {
           approval={approval}
           final={final}
           notice={notice}
+          deepRunning={deepRunning}
           onRun={runFromForm}
           onApproval={(id, ok) => {
             send({ type: "approval", id, approved: ok });
