@@ -259,6 +259,8 @@ function PathChips({ path }) {
   );
 }
 
+// The report's detail, minus the path (which has its own tab). Used for both
+// the primary report and the deeper-checks report.
 function ReportBody({ report, answer }) {
   const isSchema =
     report && (report.source || report.destination || report.result);
@@ -289,7 +291,6 @@ function ReportBody({ report, answer }) {
           ⚠ Probed from the agent machine — policy on the real path is unverified.
         </div>
       )}
-      <PathChips path={report.path} />
       {!skip(report.cause) && (
         <div className="kv">
           <div className="k">Cause</div>
@@ -312,37 +313,103 @@ function ReportBody({ report, answer }) {
   );
 }
 
+const REPORT_TABS = [
+  { key: "report", label: "Report" },
+  { key: "path", label: "Path" },
+  { key: "deep", label: "Deep" },
+];
+
 function Report({ final, busy, deepRunning, onDeep }) {
   const rep = final.report || {};
   const verdict = rep.result || (rep.text || final.answer ? "ANSWER" : "?");
   const cls = verdictClass(rep.result);
   const showVerdict = rep.result || rep.ping;
+  const isSchema = !!(rep.source || rep.destination || rep.result);
+  const [tab, setTab] = useState("report");
+
+  // when the deeper checks start, bring their tab forward so the spinner and
+  // then the second report are where the eye already is
+  useEffect(() => {
+    if (deepRunning) setTab("deep");
+  }, [deepRunning]);
+
+  // a plain text answer (a chat reply that landed here) has no tabs
+  if (!isSchema) {
+    return (
+      <div className="card report">
+        <div className="body">
+          <ReportBody report={final.report} answer={final.answer} />
+        </div>
+      </div>
+    );
+  }
+
+  const effPath = (final.deepReport && final.deepReport.path) || rep.path;
+  const hasDeep = deepRunning || !!final.deepReport || final.offerDeep;
+
   return (
     <div className="card report">
-      {showVerdict ? (
+      {showVerdict && (
         <div className={`verdict-bar ${cls}`}>
           {cls === "ok" ? "✓" : cls === "bad" ? "✕" : "!"} {String(verdict)}
           {rep.ping && <span className="sub">ping {String(rep.ping).toLowerCase()}</span>}
         </div>
-      ) : null}
+      )}
+      <div className="report-tabs">
+        {REPORT_TABS.map((t) => (
+          <button
+            key={t.key}
+            className={tab === t.key ? "on" : ""}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+            {t.key === "deep" && deepRunning && <span className="tab-spin" />}
+            {t.key === "deep" && !deepRunning && final.deepReport && (
+              <span className="tab-dot" />
+            )}
+          </button>
+        ))}
+      </div>
       <div className="body">
-        <ReportBody report={final.report} answer={final.answer} />
-        {deepRunning && (
-          <div className="deep-running">
-            <div className="spinner" />
-            <span>Running deeper checks — one command at a time…</span>
-          </div>
+        {tab === "report" && (
+          <ReportBody report={final.report} answer={final.answer} />
         )}
-        {final.deepReport && (
+        {tab === "path" && (
           <>
-            <div className="deep-divider">After deeper checks</div>
-            <ReportBody report={final.deepReport} />
+            <PathChips path={effPath} />
+            <div className="hint" style={{ marginTop: 8 }}>
+              {cls === "ok"
+                ? "Every hop answered through to the destination."
+                : "The chain stops where traffic no longer gets through."}
+            </div>
           </>
         )}
-        {final.offerDeep && !busy && !deepRunning && (
-          <button className="deep-btn" onClick={onDeep}>
-            🔎 Run deeper checks
-          </button>
+        {tab === "deep" && (
+          <>
+            {deepRunning && (
+              <div className="deep-running">
+                <div className="spinner" />
+                <span>Running deeper checks — one command at a time…</span>
+              </div>
+            )}
+            {final.deepReport && !deepRunning && (
+              <ReportBody report={final.deepReport} />
+            )}
+            {!deepRunning && !final.deepReport && (
+              <div className="deep-offer">
+                <p className="hint">
+                  {final.offerDeep
+                    ? "Reachability is unconfirmed. Dig into the route, VRF, forwarding entry, next hop, interface state and ACLs — one check at a time."
+                    : "No deeper checks were run for this result."}
+                </p>
+                {final.offerDeep && !busy && (
+                  <button className="deep-btn" onClick={onDeep}>
+                    🔎 Run deeper checks
+                  </button>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
