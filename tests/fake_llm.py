@@ -7,6 +7,7 @@ request already carries: CMDB source -> CMDB destination -> ping -> traceroute
     python tests/fake_llm.py 11499
 """
 import json
+import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -119,6 +120,46 @@ THOUGHTS = [
 ]
 
 
+_REQUEST_RE = re.compile(r"[\w.\-]+\s+to\s+[\w.\-]+", re.I)
+
+
+def _answer_from_context(asked: str, msgs) -> dict:
+    """A plain answer built from what the run already established.
+
+    The real model has the whole conversation and answers from it; this
+    imitates that closely enough to exercise the chat path: it looks at the
+    TOOL RESULTS in the thread -- not the whole request, whose system prompt
+    mentions the CMDB and the fallback and so matches every rule below.
+    """
+    seen = json.dumps([m.get("content") for m in msgs if m.get("role") == "tool"])
+    q = asked.lower()
+    if "DENY-ALL" in seen and ("block" in q or "why" in q or "cause" in q):
+        answer = ("Tufin returned BLOCKED for tcp:443: rule **DENY-ALL** on the "
+                  "DC1 edge drops it. The route and the path are fine up to "
+                  "FW-DC1-EDGE-01 - the traffic is denied by policy, not lost.")
+    elif "not in CMDB" in seen or "No data found" in seen:
+        answer = ("Neither address is in the CMDB, so the checks ran from the "
+                  "agent machine. That proves the destination answers from "
+                  "here, not that the real source can reach it.")
+    elif "next" in q or "check" in q:
+        answer = ("Next: confirm the ACL hit counter is rising "
+                  "(show access-lists EDGE-OUT | include 172.20.5.10), then "
+                  "raise the Tufin change request.")
+    elif "hop" in q or "path" in q:
+        answer = ("The path is APP-SRV-DC1-020 -> Leaf-101 -> Border-Router-01 "
+                  "-> FW-DC1-EDGE-01, where it stops. The firewall is the last "
+                  "device that answered.")
+    elif not seen.strip("[]"):
+        answer = ("Nothing has been run in this conversation yet, so I have no "
+                  "context to answer from. Fill in a source and a destination "
+                  "and press Run, then ask me about the result.")
+    else:
+        answer = ("Ask about the run: the cause, the path, the ACL, or what to "
+                  "check next.")
+    return {"thought": "Answering from the conversation, no tools needed.",
+            "final": answer}
+
+
 def _msg(content=None, tool=None, args=None):
     m = {"role": "assistant", "content": content}
     if tool:
@@ -146,8 +187,17 @@ class H(BaseHTTPRequestHandler):
         deep = "run either of them again" in json.dumps(turn)
         # the CMDB-miss scenario is keyed on its documentation-range source
         local = "198.51.100" in json.dumps(turn)
+        # A chat question -- route D in the prompt: answer from the conversation
+        # so far, no tools. Recognised the way the real model would: the request
+        # names no source AND destination.
+        asked = next((str(m.get("content") or "") for m in reversed(turn)
+                      if m.get("role") == "user"), "")
+        question = (not deep and not _REQUEST_RE.search(asked)
+                    and asked.strip().endswith("?"))
 
-        if local and not deep:
+        if question:
+            msg = _msg(json.dumps(_answer_from_context(asked, msgs)))
+        elif local and not deep:
             if done < len(LOCAL_SCRIPT):
                 name, args = LOCAL_SCRIPT[done]
                 msg = _msg(LOCAL_THOUGHTS[done], name, args)

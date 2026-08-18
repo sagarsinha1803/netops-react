@@ -329,11 +329,10 @@ function Report({ final, busy, onDeep }) {
 
 // ----------------------------------------------------------------- console --
 export default function Console({
-  wf, busy, clip, status, approval, final, notice, query,
+  wf, busy, clip, status, approval, final, notice,
   onRun, onApproval, onDeep,
 }) {
   const [showWhy, setShowWhy] = useState(false);
-  const [ask, setAsk] = useState("");
 
   const started = wf && wf.steps && wf.steps.some((s) => s.status !== "pending");
   const hasFeed = wf && ((wf.basics || []).length || (wf.checks || []).length);
@@ -347,54 +346,33 @@ export default function Console({
           : "Working…"
       : null;
 
-  const submitAsk = () => {
-    if (!ask.trim() || busy) return;
-    onRun(ask);
-    setAsk("");
-  };
-
   return (
-    <>
-      <div className="main">
-        <div className="col">
-          <CommandBar initial={wf && wf.params} busy={busy} onRun={onRun} />
-          {!started && !busy && !final && (
-            <div className="empty">
-              <h2>Is it reachable?</h2>
-              <p>
-                Source and destination — the agent finds the path, checks the
-                policy, and tells you where it breaks.
-                {clip ? " Clipboard relay is on: paste prompts into Copilot when asked." : ""}
-              </p>
-            </div>
-          )}
-          {started && <StageStrip wf={wf} />}
-          {approval && <Approval approval={approval} onApproval={onApproval} />}
-          {(hasFeed || waiting) && (
-            <Feed wf={wf} showWhy={showWhy} waiting={waiting}
-                  onToggleWhy={() => setShowWhy(!showWhy)} />
-          )}
-          {notice && (
-            <div className={`notice ${notice.kind === "err" ? "err" : ""}`}>
-              {notice.text}
-            </div>
-          )}
-          {final && <Report final={final} busy={busy} onDeep={onDeep} />}
-        </div>
+    <div className="main">
+      <div className="col">
+        <CommandBar initial={wf && wf.params} busy={busy} onRun={onRun} />
+        {!started && !busy && !final && (
+          <div className="empty">
+            <h2>Is it reachable?</h2>
+            <p>
+              Source and destination — the agent finds the path, checks the
+              policy, and tells you where it breaks. Questions go in the chat.
+              {clip ? " Clipboard relay is on: paste prompts into Copilot when asked." : ""}
+            </p>
+          </div>
+        )}
+        {started && <StageStrip wf={wf} />}
+        {approval && <Approval approval={approval} onApproval={onApproval} />}
+        {(hasFeed || waiting) && (
+          <Feed wf={wf} showWhy={showWhy} waiting={waiting}
+                onToggleWhy={() => setShowWhy(!showWhy)} />
+        )}
+        {notice && (
+          <div className={`notice ${notice.kind === "err" ? "err" : ""}`}>
+            {notice.text}
+          </div>
+        )}
+        {final && <Report final={final} busy={busy} onDeep={onDeep} />}
       </div>
-      <div className="askbar">
-        <div className="inner">
-          <input
-            value={ask}
-            placeholder="Ask anything — device details for edge-a1, or a question…"
-            onChange={(e) => setAsk(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submitAsk()}
-          />
-          <button onClick={submitAsk} disabled={busy || !ask.trim()}>
-            ↵
-          </button>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
