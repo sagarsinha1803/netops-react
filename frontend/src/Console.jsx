@@ -122,15 +122,30 @@ function FeedRow({ row, showWhy }) {
 function Feed({ wf, showWhy, onToggleWhy, waiting }) {
   const basics = (wf && wf.basics) || [];
   const checks = (wf && wf.checks) || [];
+  const [collapsed, setCollapsed] = useState(false);
   if (!basics.length && !checks.length && !waiting) return null;
+  const count = basics.length + checks.length;
   return (
     <div className="card">
-      <div className="feed-head">
+      <div className="feed-head" onClick={() => setCollapsed(!collapsed)}>
+        <span className={`chevron ${collapsed ? "" : "open"}`}>▸</span>
         Activity
-        <button className="toggle" onClick={onToggleWhy}>
-          {showWhy ? "hide reasoning" : "show reasoning"}
-        </button>
+        {collapsed && count > 0 && (
+          <span className="count">{count} command{count === 1 ? "" : "s"}</span>
+        )}
+        {!collapsed && (
+          <button
+            className="toggle"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleWhy();
+            }}
+          >
+            {showWhy ? "hide reasoning" : "show reasoning"}
+          </button>
+        )}
       </div>
+      {collapsed ? null : (
       <div className="feed">
         {basics.map((r, i) => (
           <React.Fragment key={`b${i}`}>
@@ -167,6 +182,7 @@ function Feed({ wf, showWhy, onToggleWhy, waiting }) {
         ))}
         {waiting && <WaitLine waiting={waiting} />}
       </div>
+      )}
     </div>
   );
 }
