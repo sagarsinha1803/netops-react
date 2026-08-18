@@ -314,9 +314,14 @@ async def run_turn(sess: Session, text: str, show_commands=False):
     first_input = {"messages": [("user", text)], "loops": 0,
                    "max_loops": (C.DEEP_MAX_LOOPS if show_commands
                                  else C.MAX_TOOL_LOOPS)}
-    # a NEW request must clear the first-one-wins capture of the previous one
+    # a NEW request must clear the first-one-wins capture of the previous one,
+    # AND the CMDB records it gathered -- the graph thread is shared across
+    # turns, so without this the device dict accumulates and the CMDB stage
+    # counts a previous run's lookups (a found/not-found tally that mixes runs).
+    # A deeper-checks turn keeps them: it reasons from the same run's records.
     if not show_commands:
-        first_input.update({"ping_ok": None, "hops": [], "path": ""})
+        first_input.update({"ping_ok": None, "hops": [], "path": "",
+                            "devices": {}})
 
     try:
         state = await drive(sess, app_graph, config, first_input, show_commands)

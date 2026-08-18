@@ -219,9 +219,23 @@ class Workflow:
                         "path": state.get("path") or "",
                         "hops": len(state.get("hops") or []),
                         "local": self.local}
-        if state.get("devices"):
-            self.set("cmdb", "done",
-                     f"{len(state['devices'])} device record(s) fetched")
+        devices = state.get("devices") or {}
+        if devices:
+            # devices holds EVERY lookup, hits and misses alike. A hit is a
+            # record (dict, so its text starts with "{"); a miss is the plain
+            # "No data found ..." / "Error ..." sentence the CMDB returns. A
+            # green tick for a lookup that found nothing is a lie -- mark it.
+            found = [k for k, v in devices.items()
+                     if str(v).strip().startswith("{")]
+            missed = len(devices) - len(found)
+            if not found:
+                self.set("cmdb", "failed", "no record in CMDB")
+            elif missed:
+                self.set("cmdb", "done",
+                         f"{len(found)} found, {missed} not in CMDB")
+            else:
+                self.set("cmdb", "done",
+                         f"{len(found)} device record(s) fetched")
         ping = state.get("ping_ok")
         if ping is True:
             self.set("ping", "done", "Ping result: reachable"
