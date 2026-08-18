@@ -33,8 +33,12 @@ netops-react/
 │   ├── main.py                 FastAPI + the /ws WebSocket protocol
 │   └── workflow.py             panel state, ported from the Chainlit UI
 │
-├── frontend/                   Vite + React (dark, no UI framework)
-│   └── src/App.jsx · Chat.jsx · Panel.jsx · styles.css
+├── frontend/                   Vite + React (no UI framework)
+│   └── src/App.jsx · Console.jsx · styles.css
+│                               agent console, not a chat: command bar,
+│                               stage strip, compact activity feed (reasoning
+│                               and raw output behind toggles), verdict card.
+│                               Light/dark theme button, persisted.
 │
 └── tests/                      same suite as netops, plus test_local_probe.py
 ```

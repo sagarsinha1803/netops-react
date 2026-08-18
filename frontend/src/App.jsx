@@ -1,25 +1,28 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import Chat from "./Chat.jsx";
-import Panel from "./Panel.jsx";
+import Console from "./Console.jsx";
 
-// ---- websocket url: same origin in prod, vite proxy in dev -----------------
 const WS_URL =
   (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
 
-let nextId = 1;
-
 export default function App() {
-  const [items, setItems] = useState([]); // the chat stream
-  const [wf, setWf] = useState(null); // workflow panel snapshot
+  const [wf, setWf] = useState(null);
   const [status, setStatus] = useState({ state: "idle", detail: "" });
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [clip, setClip] = useState(false);
+  const [approval, setApproval] = useState(null); // {id, payload}
+  const [final, setFinal] = useState(null); // {report, deepReport, offerDeep, answer}
+  const [notice, setNotice] = useState(null); // {kind, text}
+  const [query, setQuery] = useState(null); // what the current run is about
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("netops-theme") || "dark",
+  );
   const wsRef = useRef(null);
 
-  const push = useCallback((item) => {
-    setItems((prev) => [...prev, { id: nextId++, ...item }]);
-  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("netops-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     let ws;
@@ -29,12 +32,11 @@ export default function App() {
     const connect = () => {
       ws = new WebSocket(WS_URL);
       wsRef.current = ws;
-
       ws.onopen = () => setConnected(true);
       ws.onclose = () => {
         setConnected(false);
         setBusy(false);
-        if (!closed) retry = setTimeout(connect, 1500); // auto-reconnect
+        if (!closed) retry = setTimeout(connect, 1500);
       };
       ws.onmessage = (ev) => {
         let msg;
@@ -46,53 +48,48 @@ export default function App() {
         switch (msg.type) {
           case "hello":
             setClip(!!msg.clip);
-            push({ kind: "assistant", text: msg.greeting });
-            if (msg.clip)
-              push({
-                kind: "notice",
-                text:
-                  "Clipboard relay is on: when the status says waiting for " +
-                  "clipboard, paste the prompt into Copilot and copy its reply back.",
-              });
             break;
-          case "user_echo":
+          case "user_echo": {
             setBusy(true);
-            push({ kind: "user", text: msg.text });
+            setNotice(null);
+            setApproval(null);
+            const deep = msg.text === "Run deeper checks";
+            setQuery(msg.text);
+            if (!deep) setFinal(null); // a deep turn extends the current report
             break;
+          }
           case "status":
             setStatus({ state: msg.state, detail: msg.detail || "" });
-            break;
-          case "thought":
-            push({ kind: "thought", text: msg.text });
-            break;
-          case "tool_result":
-            push({ kind: "tool_result", name: msg.name, body: msg.body });
-            break;
-          case "step":
-            push({ kind: "step", ...msg });
-            break;
-          case "approval_request":
-            push({ kind: "approval", aid: msg.id, payload: msg.payload });
-            break;
-          case "rejected":
-            push({ kind: "notice", text: `⛔ Rejected: ${msg.command}` });
+            if (msg.state === "degraded")
+              setNotice({ kind: "warn", text: msg.detail });
             break;
           case "workflow":
             setWf(msg.wf);
             break;
+          case "approval_request":
+            setApproval({ id: msg.id, payload: msg.payload });
+            break;
+          case "rejected":
+            setNotice({ kind: "info", text: `Rejected: ${msg.command}` });
+            break;
           case "final":
             setBusy(false);
-            push({
-              kind: "final",
-              answer: msg.answer,
-              report: msg.report,
-              offerDeep: msg.offer_deep,
-              isDeep: msg.is_deep,
-            });
+            setApproval(null);
+            setFinal((prev) =>
+              msg.is_deep
+                ? { ...(prev || {}), deepReport: msg.report, offerDeep: false }
+                : {
+                    report: msg.report,
+                    answer: msg.answer,
+                    offerDeep: msg.offer_deep,
+                    deepReport: null,
+                  },
+            );
             break;
           case "error":
             setBusy(false);
-            push({ kind: "error", text: msg.message });
+            setApproval(null);
+            setNotice({ kind: "err", text: msg.message });
             break;
           default:
             break;
@@ -106,7 +103,7 @@ export default function App() {
       clearTimeout(retry);
       ws && ws.close();
     };
-  }, [push]);
+  }, []);
 
   const send = useCallback((obj) => {
     const ws = wsRef.current;
@@ -122,13 +119,9 @@ export default function App() {
   );
 
   const answerApproval = useCallback(
-    (aid, approved) => {
-      send({ type: "approval", id: aid, approved });
-      setItems((prev) =>
-        prev.map((it) =>
-          it.kind === "approval" && it.aid === aid ? { ...it, decided: approved ? "approved" : "rejected" } : it,
-        ),
-      );
+    (id, approved) => {
+      send({ type: "approval", id, approved });
+      setApproval(null);
     },
     [send],
   );
@@ -139,17 +132,47 @@ export default function App() {
   }, [busy, send]);
 
   const statusPill = () => {
-    if (!connected) return <span className="pill warn"><span className="dot" />disconnected</span>;
+    if (!connected)
+      return (
+        <span className="pill warn">
+          <span className="dot" />
+          disconnected
+        </span>
+      );
     if (status.state === "waiting_clipboard")
-      return <span className="pill busy"><span className="dot" />waiting for clipboard</span>;
-    if (status.state === "approval")
-      return <span className="pill warn"><span className="dot" />awaiting approval</span>;
+      return (
+        <span className="pill busy">
+          <span className="dot" />
+          waiting for clipboard
+        </span>
+      );
+    if (approval)
+      return (
+        <span className="pill warn">
+          <span className="dot" />
+          awaiting approval
+        </span>
+      );
     if (status.state === "executing")
-      return <span className="pill busy"><span className="dot" />executing</span>;
-    if (status.state === "degraded")
-      return <span className="pill warn"><span className="dot" />{status.detail}</span>;
-    if (busy) return <span className="pill busy"><span className="dot" />thinking</span>;
-    return <span className="pill on"><span className="dot" />ready</span>;
+      return (
+        <span className="pill busy">
+          <span className="dot" />
+          executing
+        </span>
+      );
+    if (busy)
+      return (
+        <span className="pill busy">
+          <span className="dot" />
+          working
+        </span>
+      );
+    return (
+      <span className="pill on">
+        <span className="dot" />
+        ready
+      </span>
+    );
   };
 
   return (
@@ -160,23 +183,28 @@ export default function App() {
         </div>
         {statusPill()}
         {clip && <span className="pill">clipboard relay</span>}
+        <div className="spacer" />
+        <button
+          className="icon-btn"
+          title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        >
+          {theme === "dark" ? "☀" : "🌙"}
+        </button>
       </div>
-      <div className="body">
-        <div className="chat-col">
-          <Chat
-            items={items}
-            busy={busy}
-            status={status}
-            clip={clip}
-            onSend={sendChat}
-            onApproval={answerApproval}
-            onDeep={runDeep}
-          />
-        </div>
-        <div className="panel-col">
-          <Panel wf={wf} busy={busy} onRun={sendChat} />
-        </div>
-      </div>
+      <Console
+        wf={wf}
+        busy={busy}
+        clip={clip}
+        status={status}
+        approval={approval}
+        final={final}
+        notice={notice}
+        query={query}
+        onRun={sendChat}
+        onApproval={answerApproval}
+        onDeep={runDeep}
+      />
     </div>
   );
 }

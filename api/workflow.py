@@ -143,26 +143,31 @@ class Workflow:
     def add_check(self, command, device, region=None, thought=""):
         self.checks.append({"cmd": command, "device": device, "region": region,
                             "status": "running", "detail": "", "thought": thought,
-                            "step": len(self.checks) + 1})
+                            "output": "", "step": len(self.checks) + 1})
         return len(self.checks) - 1
 
-    def finish_check(self, idx, ok, detail=""):
+    def finish_check(self, idx, ok, detail="", output=""):
         if 0 <= idx < len(self.checks):
             self.checks[idx]["status"] = "done" if ok else "failed"
             self.checks[idx]["detail"] = detail
+            if output:
+                self.checks[idx]["output"] = output[:2000]
 
     def add_basic(self, command, device=None, region=None, thought="", kind="cmdb"):
         self.basics.append({"cmd": command, "device": device, "region": region,
                             "status": "running", "detail": "", "thought": thought,
-                            "kind": kind, "step": len(self.basics) + 1})
+                            "output": "", "kind": kind,
+                            "step": len(self.basics) + 1})
         return len(self.basics) - 1
 
-    def finish_basic(self, idx, ok, detail="", device=None):
+    def finish_basic(self, idx, ok, detail="", device=None, output=""):
         if 0 <= idx < len(self.basics):
             self.basics[idx]["status"] = "done" if ok else "failed"
             self.basics[idx]["detail"] = detail
             if device:
                 self.basics[idx]["device"] = device
+            if output:
+                self.basics[idx]["output"] = output[:2000]
 
     # ---- derived from graph state -----------------------------------------
     def _path_from_state(self, state):
