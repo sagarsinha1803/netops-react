@@ -312,7 +312,7 @@ function ReportBody({ report, answer }) {
   );
 }
 
-function Report({ final, busy, onDeep }) {
+function Report({ final, busy, deepRunning, onDeep }) {
   const rep = final.report || {};
   const verdict = rep.result || (rep.text || final.answer ? "ANSWER" : "?");
   const cls = verdictClass(rep.result);
@@ -327,13 +327,19 @@ function Report({ final, busy, onDeep }) {
       ) : null}
       <div className="body">
         <ReportBody report={final.report} answer={final.answer} />
+        {deepRunning && (
+          <div className="deep-running">
+            <div className="spinner" />
+            <span>Running deeper checks — one command at a time…</span>
+          </div>
+        )}
         {final.deepReport && (
           <>
             <div className="deep-divider">After deeper checks</div>
             <ReportBody report={final.deepReport} />
           </>
         )}
-        {final.offerDeep && !busy && (
+        {final.offerDeep && !busy && !deepRunning && (
           <button className="deep-btn" onClick={onDeep}>
             🔎 Run deeper checks
           </button>
@@ -345,7 +351,7 @@ function Report({ final, busy, onDeep }) {
 
 // ----------------------------------------------------------------- console --
 export default function Console({
-  wf, busy, clip, status, approval, final, notice,
+  wf, busy, clip, status, approval, final, notice, deepRunning,
   onRun, onApproval, onDeep,
 }) {
   const [showWhy, setShowWhy] = useState(false);
@@ -387,7 +393,10 @@ export default function Console({
             {notice.text}
           </div>
         )}
-        {final && <Report final={final} busy={busy} onDeep={onDeep} />}
+        {final && (
+          <Report final={final} busy={busy} deepRunning={deepRunning}
+                  onDeep={onDeep} />
+        )}
       </div>
     </div>
   );
