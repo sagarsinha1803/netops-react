@@ -1,0 +1,20 @@
+# Pinned to what the working machine runs. Install with:
+#   uv pip install -r requirements.txt
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+langgraph==1.2.9
+langchain-core==1.5.0
+langchain-mcp-adapters==0.3.0
+langchain-openai==1.4.0
+mcp==1.28.1
+fastmcp==3.4.4
+pydantic==2.13.4
+requests==2.34.2
+PyYAML==6.0.3
+python-dotenv==1.2.2
+pyperclip==1.11.0
+urllib3==2.7.0
+
+# paramiko is NOT here: only the host that actually runs
+# troubleshoot_agent_mcp.py needs it. See requirements-device.txt.

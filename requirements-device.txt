@@ -1,0 +1,7 @@
+# Extra dependencies for the host that RUNS mcp_tools/troubleshoot_agent_mcp.py
+# -- the box with bastion access. The agent machine reaches that server over SSE
+# and does not need these.
+#
+#   uv pip install -r requirements.txt -r requirements-device.txt
+
+paramiko>=3.4,<6

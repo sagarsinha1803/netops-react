@@ -1,0 +1,31 @@
+# secrets -- never commit
+credentials.yml
+.env
+
+# the clipboard relay writes the last paste here in clear
+last_prompt.txt
+**/last_prompt.txt
+tufin_raw.json
+
+# local state
+*.db
+data/*.db
+.files/
+**/.files/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# chainlit regenerates these on first run
+.chainlit/translations/
+**/.chainlit/translations/
+.chainlit/.langchain.db
+
+# editors
+.vscode/
+.idea/
+
+# frontend
+frontend/node_modules/
+frontend/dist/
