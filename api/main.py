@@ -189,13 +189,14 @@ async def drive(sess: Session, app_graph, config, first_input,
                     detail = failed_line(body) or (useful or lines or [""])[0]
                     ok = check_ok(body)
                     if tid in check_idx:
-                        wf.finish_check(check_idx[tid], ok, detail[:70])
+                        wf.finish_check(check_idx[tid], ok, detail[:70],
+                                        output=body)
                     elif wf.basics[basic_idx[tid]].get("kind") == "policy":
                         verdict, acl = policy_verdict(body)
                         wf.finish_basic(
                             basic_idx[tid], verdict == "ALLOWED",
                             f"{verdict}{f' · {acl}' if acl else ''}",
-                            device="Tufin SecureTrack")
+                            device="Tufin SecureTrack", output=body)
                         wf.set("policy",
                                "done" if verdict == "ALLOWED"
                                else "failed" if verdict == "BLOCKED" else "skipped",
@@ -205,9 +206,10 @@ async def drive(sess: Session, app_graph, config, first_input,
                         found = device_label(body, "")
                         wf.finish_basic(basic_idx[tid], bool(found),
                                         "" if found else "not found in CMDB",
-                                        device=found or None)
+                                        device=found or None, output=body)
                     else:
-                        wf.finish_basic(basic_idx[tid], ok, detail[:70])
+                        wf.finish_basic(basic_idx[tid], ok, detail[:70],
+                                        output=body)
                     await sess.push_wf()
                 if show_commands and name in DEVICE_TOOL_NAMES:
                     step_no += 1
