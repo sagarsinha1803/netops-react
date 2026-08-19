@@ -124,6 +124,21 @@ CLIP_MODE = os.environ.get("CLIP_MODE", "delta")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o")
 
+# Bearer token for the endpoint. A local vLLM usually ignores it, so the
+# placeholder keeps that case working with nothing configured -- but GitHub
+# Models and any gateway in front of vLLM will reject the placeholder, which
+# surfaces as a 401 rather than anything about a missing setting.
+#
+# Keep it in .env or the environment, never in the code: it is a credential.
+LLM_API_KEY = (os.environ.get("LLM_API_KEY")
+               or os.environ.get("OPENAI_API_KEY")
+               or os.environ.get("GITHUB_TOKEN")
+               or "EMPTY")
+
+# Seconds to wait for a completion. A reasoning model behind vLLM can be slow,
+# and the default (600s) matches the patience the clipboard relay had.
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "600"))
+
 # ---- UI ----------------------------------------------------------------------
 CHAT_HISTORY = os.environ.get("CHAT_HISTORY", "1").lower() not in ("0", "false", "no")
 APP_USER = os.environ.get("APP_USER", "netops")
