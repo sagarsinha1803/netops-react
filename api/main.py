@@ -291,6 +291,19 @@ class _Frontend(StaticFiles):
     the app silently runs old code against a new API.
     """
 
+    async def __call__(self, scope, receive, send):
+        # This mount catches everything unmatched, including WebSocket upgrades
+        # -- a browser tab still running the old bundle keeps dialling /ws,
+        # which no longer exists. StaticFiles asserts on a non-http scope, so
+        # without this the server answers a stale tab with a 500 and a
+        # traceback per retry. Close the socket politely instead.
+        if scope["type"] != "http":
+            if scope["type"] == "websocket":
+                await receive()                      # the connect message
+                await send({"type": "websocket.close", "code": 1000})
+            return
+        await super().__call__(scope, receive, send)
+
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
         if path in ("", ".", "/") or path.endswith(".html"):
