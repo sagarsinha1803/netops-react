@@ -1,10 +1,9 @@
 """The workflow panel's state, ported from the Chainlit UI minus Chainlit.
 
-Pure state, no transport: a run owns one of these and bumps its version on
-every change; the API layer decides when to hand a snapshot out (in a REST
-response, or over the SSE stream). No element re-mounting and no publish
-bookkeeping -- the client gets the whole snapshot and renders it in place,
-which is the entire reason for leaving Chainlit.
+Pure state: the WebSocket layer decides when to push a snapshot. No polling
+route, no element re-mounting, no publish bookkeeping -- the React client gets
+the whole snapshot on every change and renders it in place, which is the entire
+reason for leaving Chainlit.
 """
 import json
 import re

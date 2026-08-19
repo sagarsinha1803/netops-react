@@ -11,18 +11,19 @@ are the map.
 ```
    BROWSER                    SERVER (one process)                 NETWORK
  ┌───────────┐         ┌──────────────────────────────┐        ┌────────────┐
- │  React    │  HTTP   │  FastAPI          api/       │  stdio │  unicorn   │  CMDB
- │  console  │────────▶│    ├─ REST endpoints         │───────▶│  MCP       │
- │           │         │    └─ SSE stream             │        ├────────────┤
- │           │◀────────│                              │  stdio │  tufin     │  firewall
- └───────────┘  events │  Run store       api/runs.py │───────▶│  MCP       │  policy
-                       │    one run = one agent turn  │        ├────────────┤
-                       │            │                 │   SSE  │  ssh MCP   │  devices
-                       │            ▼                 │───────▶│ via bastion│
-                       │  LangGraph agent    agent/   │        ├────────────┤
-                       │    ├─ guards.py  (read-only) │  stdio │ local probe│  this host
-                       │    ├─ masking    (3 layers)  │───────▶│  MCP       │
-                       │    └─ LLM: Copilot relay/API │        └────────────┘
+ │  React    │   ws    │  FastAPI          api/       │  stdio │  unicorn   │  CMDB
+ │  console  │◀═══════▶│    └─ /ws  one socket per tab│───────▶│  MCP       │
+ │           │  frames │              │               │        ├────────────┤
+ │           │         │              ▼               │  stdio │  tufin     │  firewall
+ └───────────┘         │  Session      api/main.py    │───────▶│  MCP       │  policy
+                       │    drive() walks the graph   │        ├────────────┤
+                       │    Workflow   api/workflow.py│   SSE  │  ssh MCP   │  devices
+                       │            │                 │───────▶│ via bastion│
+                       │            ▼                 │        ├────────────┤
+                       │  LangGraph agent    agent/   │  stdio │ local probe│  this host
+                       │    ├─ guards.py  (read-only) │───────▶│  MCP       │
+                       │    ├─ masking    (3 layers)  │        └────────────┘
+                       │    └─ LLM: Copilot relay/API │
                        └──────────────────────────────┘
 ```
 
@@ -30,8 +31,8 @@ Four layers, each replaceable without touching the others:
 
 | Layer | Directory | Knows about |
 |---|---|---|
-| UI | `frontend/` | HTTP endpoints only |
-| API | `api/` | Runs, the workflow panel's shape |
+| UI | `frontend/` | The WebSocket message types |
+| API | `api/` | Sessions, the workflow panel's shape |
 | Agent | `agent/` | The LLM, the graph, the guards, masking |
 | Tools | `mcp_tools/` | The office systems: CMDB, Tufin, bastions |
 
@@ -45,17 +46,18 @@ touching a line of `agent/`.
 
 Follow one request the whole way down.
 
-**1. The browser POSTs.** `frontend/src/api.js` sends
+**1. The browser sends a frame.** `App.jsx` writes to the socket opened at
+page load:
 
-```http
-POST /api/runs   {"source":"10.10.1.20","destination":"172.20.5.10",
-                  "protocol":"TCP","port":"443"}
+```json
+{"type": "chat", "text": "troubleshoot 10.10.1.20 to 172.20.5.10 TCP 443"}
 ```
 
-**2. The API starts a run and answers immediately** (`api/main.py` →
-`api/runs.py: start()`). It returns `202` with a `run_id`. The agent has not
-done anything yet. The run executes as an asyncio task, so the HTTP request is
-not held open and the browser can be closed without killing it.
+**2. The server starts the turn** (`api/main.py: ws_endpoint` → `start_turn` →
+`run_turn`). It echoes `user_echo` back so the UI knows the turn began, then
+runs the agent in an asyncio task on that connection. One turn at a time per
+socket — a second request while one is in flight is refused, because the
+clipboard relay is a single global resource.
 
 **3. The run builds the agent** (`agent/graph.py: build_agent()`): it connects
 to the four MCP servers, collects their tools, and binds them to the model. A
@@ -77,9 +79,10 @@ why the app still works from a laptop with no bastion access.
   with `configure`, `write`, `reload`, `clear`… is rejected. Commands that would
   dump a whole table (`show running-config`, bare `show route`) are rejected too
   — harmless to the device, fatal to the context window.
-- **Human approval** — the graph raises a LangGraph `interrupt`. The run parks:
-  `status` becomes `waiting_approval` and `pending_approval` carries the exact
-  command. Nothing runs until `POST /api/runs/{id}/approvals/{aid}` arrives.
+- **Human approval** — the graph raises a LangGraph `interrupt`. The server
+  sends an `approval_request` frame carrying the exact command and blocks on an
+  asyncio `Future`. Nothing runs until an `approval` frame comes back and
+  resolves it.
 
   Approvals for a whole batch are collected *before* any command executes, so
   resuming a parked run can never run something twice.
@@ -94,12 +97,11 @@ two things happen to it:
 
 **7. The panel state updates.** `api/workflow.py` mirrors everything into the
 shape the UI renders: stage statuses, the command rows with their output, the
-hop chain, the report. Each change bumps the run's version and wakes the SSE
-subscribers.
+hop chain, the report. Each change is pushed as a `workflow` frame carrying the
+complete snapshot — never a delta, so the client just replaces what it has.
 
 **8. The model concludes** with a structured verdict — source, destination,
-ping, path, result, evidence, cause, next step — and the run's status becomes
-`done`.
+ping, path, result, evidence, cause, next step — sent as a `final` frame.
 
 ---
 
@@ -198,52 +200,58 @@ enter the agent process at all.
 
 | File | Role |
 |---|---|
-| `main.py` | The endpoints, their documentation, the static mount |
-| `models.py` | Pydantic request/response shapes — these *are* the Swagger page |
-| `runs.py` | The run store and the drive loop that walks the graph |
+| `main.py` | The `/ws` endpoint, the session, the drive loop, the static mount |
 | `workflow.py` | The panel's state: stages, command rows, path, report |
 
-### A run
+### The session
 
-A run is one agent turn, addressable by id, executing in the background:
+One WebSocket per browser tab, and one `Session` behind it (`api/main.py`)
+holding that tab's checkpointer, graph thread id, workflow state and pending
+approvals. The agent's work happens on that connection, so closing the tab ends
+the turn.
 
-```
-running ──▶ waiting_approval ──▶ running ──▶ … ──▶ done
-   │              (parked on a Future)                │
-   └──────────────────────────────────────────────▶ error
-```
+**One turn at a time per socket.** The agent is a single conversation with a
+single model, and in clipboard mode there is exactly one clipboard: a second
+concurrent turn would consume the reply meant for the first. `sess.busy`
+refuses it with an `error` frame.
 
-Runs live in memory (`RunStore`, capped at 50). They are live conversations, not
-records — restarting the server clears them.
+**One graph thread per session.** That is what lets a question be answered from
+the previous run's evidence — the CMDB records and the probe output are still
+in the conversation.
 
-**One run at a time.** The agent is a single conversation with a single model,
-and in clipboard mode there is exactly one clipboard: a second concurrent run
-would consume the reply meant for the first. Starting one while another is
-active returns `409`.
+### The protocol
 
-**One graph thread for the process.** That is what lets a question be answered
-from the previous run's evidence — the CMDB records and the probe output are
-still in the conversation.
+One JSON object per frame. Client → server:
 
-### The endpoints
+| Frame | Meaning |
+|---|---|
+| `{"type":"chat","text":…}` | A request or a question |
+| `{"type":"deep_check"}` | Run the deeper diagnostics |
+| `{"type":"approval","id":…,"approved":…}` | Answer the parked command |
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/health` | Backend mode, mocks, masking, active run |
-| `POST` | `/api/runs` | Start a troubleshooting run → `202` + run |
-| `GET` | `/api/runs` | Recent runs, newest first |
-| `GET` | `/api/runs/{id}` | One run in full |
-| `GET` | `/api/runs/{id}/events` | SSE: the whole run object on every change |
-| `POST` | `/api/runs/{id}/approvals/{aid}` | Approve or reject the parked command |
-| `POST` | `/api/runs/{id}/deep` | Run the deeper diagnostics |
-| `POST` | `/api/ask` | A question, answered from run context |
-| `GET` | `/api/devices/{name}` | Direct CMDB lookup |
+Server → client:
 
-Interactive docs at **`/docs`**, spec at `/openapi.json`.
+| Frame | Carries |
+|---|---|
+| `hello` | Greeting, whether the clipboard relay is on |
+| `user_echo` | Confirms a turn started |
+| `status` | `thinking` / `waiting_clipboard` / `executing` / `approval` / `degraded` |
+| `thought` | The model's reasoning before a step |
+| `tool_result` | A tool's output, truncated |
+| `approval_request` | The exact command awaiting a decision |
+| `workflow` | The **complete** panel snapshot |
+| `step` | One deeper-check command with its output |
+| `rejected` | A command the reviewer declined |
+| `final` | The verdict, and whether deeper checks are worth offering |
+| `error` | Anything that went wrong |
 
-Every SSE frame is the *complete* run object, not a delta, so a client never
-merges partial updates — it renders whatever arrived last, and a reconnect
-self-heals.
+`workflow` frames carry the whole snapshot rather than a delta, so the client
+never merges partial updates — it replaces what it has. The client reconnects
+on close (1.5s backoff) and the server sends `hello` plus the current workflow
+on connect.
+
+There is also `GET /api/health` (backend mode, mocks) — the only plain HTTP
+endpoint besides the static files.
 
 ---
 
@@ -251,8 +259,7 @@ self-heals.
 
 | File | Role |
 |---|---|
-| `api.js` | Every call to the backend. The only place a URL appears. |
-| `App.jsx` | Holds one run object; wires actions to endpoints |
+| `App.jsx` | Owns the socket; turns frames into state, actions into frames |
 | `Console.jsx` | The console: command bar, stage strip, activity feed, report |
 | `ChatPanel.jsx` | The optional chat drawer |
 | `styles.css` | Both themes as CSS variables |
@@ -260,21 +267,28 @@ self-heals.
 ### State flow
 
 ```
-   CommandBar ──POST /api/runs──▶ backend
-                                    │
-   App  ◀──── SSE: whole run ───────┘
+   CommandBar ──{"type":"chat"}────▶┐
+   Approval   ──{"type":"approval"}─┤  ws  │  backend
+   ChatPanel  ──{"type":"chat"}─────┘      │
+                                           │
+   App  ◀── workflow · final · status ─────┘
      │
      ├─▶ Console      (stage strip · activity feed · report tabs)
-     │      └─ Approval card ──POST approvals──▶ backend
-     └─▶ ChatPanel ────────────POST /api/ask───▶ backend
+     └─▶ ChatPanel    (answers to questions)
 ```
 
-`App.jsx` holds **one piece of real state: the current run object, exactly as
-the API returns it.** Everything on screen is derived from it — the stage strip
-from `workflow.steps`, the feed from `workflow.basics` + `workflow.checks`, the
-verdict from `report.result`. No state exists in the browser that the backend
-does not also hold, which is why a mid-run refresh rejoins the run instead of
-losing it (`App.jsx` looks for a live run on load and re-subscribes).
+`App.jsx` is the only component that touches the socket. It keeps the pieces
+the frames describe — `wf` (the panel snapshot), `status`, `approval`, `final`,
+`chatMsgs` — and passes them down; `Console` and `ChatPanel` are otherwise
+presentational.
+
+Two refs do the routing that state cannot: `originRef` remembers whether the
+turn in flight came from the form or the chat box, so a question's answer lands
+in the drawer and never overwrites the report it is asking about.
+
+The connection retries every 1.5s if it drops, and the header pill shows
+`disconnected` while it is down. State lives on the connection, so a refresh
+starts a fresh session — the run itself is gone with the socket.
 
 ### The console, top to bottom
 
@@ -340,5 +354,6 @@ Tests are plain scripts — exit 0 means pass:
   do not follow the code.
 - **`mcp_tools/troubleshoot_agent_mcp.py`** → it is deployed on the host with
   bastion access; the copy here is the source of truth for what runs there.
-- **The response models in `api/models.py`** → that is the published contract;
-  the frontend and Swagger both follow it.
+- **The WebSocket frames in `api/main.py`** → that is the contract between the
+  two halves; `App.jsx` has to learn any new frame type, and a renamed one
+  breaks the UI silently rather than loudly.
