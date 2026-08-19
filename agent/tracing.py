@@ -133,28 +133,49 @@ class FileTracer(BaseCallbackHandler):
                      "output": str(output)[:4000]})
 
 
-def _start_phoenix():
-    """Launch the Phoenix UI in this process and instrument LangChain.
+PHOENIX_URL = os.environ.get("PHOENIX_URL", "http://localhost:6006")
 
-    Everything stays on localhost: Phoenix keeps its traces in memory (or in
-    its own local store) and talks to nothing outside the machine.
+
+def _start_phoenix():
+    """Send traces to a Phoenix server that is already running.
+
+    Deliberately NOT px.launch_app(): starting the UI inside this process took
+    long enough that Phoenix gave up on itself ("server took too long to
+    start"), and it would die with the agent anyway. Run it alongside instead,
+    where it keeps its history across restarts:
+
+        .venv\\Scripts\\phoenix.exe serve
+
+    Everything stays on localhost -- Phoenix stores traces in its own local
+    database and talks to nothing outside the machine.
     """
     try:
-        import phoenix as px
         from openinference.instrumentation.langchain import LangChainInstrumentor
         from phoenix.otel import register
     except ImportError:
-        print("[trace] TRACE=phoenix needs:  uv pip install arize-phoenix "
-              "openinference-instrumentation-langchain", file=sys.stderr)
+        print("[trace] TRACE=phoenix needs:  uv pip install -r requirements-trace.txt",
+              file=sys.stderr)
         return
+
+    import urllib.error
+    import urllib.request
     try:
-        session = px.launch_app()
+        urllib.request.urlopen(PHOENIX_URL, timeout=3)
+    except Exception:
+        print(f"[trace] no Phoenix at {PHOENIX_URL} -- start it with:\n"
+              f"        .venv\\Scripts\\phoenix.exe serve\n"
+              f"        (tracing to the file continues either way)",
+              file=sys.stderr)
+        return
+
+    try:
         tracer_provider = register(project_name="netops-agent",
-                                   endpoint="http://localhost:6006/v1/traces")
+                                   endpoint=f"{PHOENIX_URL}/v1/traces",
+                                   auto_instrument=False)
         LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
-        print(f"[trace] Phoenix UI on {session.url}", file=sys.stderr)
+        print(f"[trace] sending traces to Phoenix at {PHOENIX_URL}", file=sys.stderr)
     except Exception as e:                            # never block the agent
-        print(f"[trace] Phoenix failed to start: {e}", file=sys.stderr)
+        print(f"[trace] Phoenix instrumentation failed: {e}", file=sys.stderr)
 
 
 def callbacks() -> list:
