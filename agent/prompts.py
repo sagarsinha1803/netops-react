@@ -184,8 +184,9 @@ RULES:
 
 USING execute_query_on_server:
 - "commands" is a LIST even for one command: {"commands": ["ping 10.1.1.1 repeat 3"]}
-- "region" is REQUIRED -- use the region returned by the CMDB lookup for the
-  SOURCE device (PARIS, ASIA, AMER, UK, INDIA or IBFS).
+- "region" is REQUIRED -- pass back the region string the CMDB lookup returned
+  for the SOURCE device, exactly as it was given. Do not invent one, and do not
+  translate it: the tool validates it against the configured regions.
 - Run on the SOURCE: device_ip is the source device; the destination goes inside
   the command text.
 - Write function names and argument names plainly: get_device_details, not

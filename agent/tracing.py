@@ -29,6 +29,17 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 _LOCK = threading.Lock()
 
+
+def _walk(value, fn):
+    """Apply fn to every string in a nested structure. Keys are left alone."""
+    if isinstance(value, str):
+        return fn(value)
+    if isinstance(value, dict):
+        return {k: _walk(v, fn) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_walk(v, fn) for v in value]
+    return value
+
 TRACE = os.environ.get("TRACE", "").strip().lower()
 TRACE_MASKED = os.environ.get("TRACE_MASKED", "").strip().lower() in ("1", "true", "yes")
 TRACE_FILE = os.environ.get(
@@ -85,14 +96,19 @@ class FileTracer(BaseCallbackHandler):
                  "messages": self._messages(messages)}
         if TRACE_MASKED:
             # the same prompt as the endpoint will see it -- the two halves
-            # side by side are what makes a masking bug obvious
+            # side by side are what makes a masking bug obvious.
+            #
+            # EVERY string, not just the content: tool call arguments carry
+            # addresses too, and masking only the prose here made this view
+            # report a leak that the real request does not have -- a monitor
+            # that cries wolf is worse than none, and the same blind spot
+            # would have hidden a genuine leak in the arguments.
             try:
                 from agent.llm import ip_mask
                 mask = ip_mask.session_mask()
-                entry["sent"] = [{**m, "content": mask.mask(m["content"])}
-                                 for m in entry["messages"]]
-            except Exception:
-                pass
+                entry["sent"] = _walk(entry["messages"], mask.mask)
+            except Exception as e:
+                print(f"[trace] could not mask the sent copy: {e}", file=sys.stderr)
         self._write(entry)
 
     def on_llm_end(self, response, *, run_id=None, **kwargs):
