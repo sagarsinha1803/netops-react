@@ -96,6 +96,27 @@ CMDB knows neither address → the model is told (prompt routing rule) to use
 - Source in CMDB but destination missing → normal workflow: the source
   device can ping whatever address it is given.
 
+## Watching the prompts
+
+Local prompt tracing -- LangSmith without the cloud, nothing leaving the box:
+
+```powershell
+$env:TRACE="file"; .un.ps1 -Mock          # data/prompt_trace.jsonl, no extra deps
+$env:TRACE="phoenix"; .un.ps1 -Mock       # the above + a UI on localhost:6006
+```
+
+Each entry is one model call: the messages that went out, the reply, any tool
+calls, and how long it took. `TRACE_MASKED=1` records BOTH the real prompt and
+the masked one the endpoint actually received, side by side -- which is how you
+check the masking rather than trusting it.
+
+`TRACE=phoenix` needs `uv pip install -r requirements-trace.txt`. Watch the
+`openai` version afterwards: phoenix pulls a newer one than langchain-openai
+supports, and the only symptom is "Connection error" on every call.
+
+**The trace holds UNMASKED prompts** -- that is the point of it, and the reason
+`data/prompt_trace.jsonl` is gitignored. Delete it when you are done.
+
 ## Safety — unchanged from netops
 
 Read-only allowlist in code, human approval on every device command, Tufin
