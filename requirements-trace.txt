@@ -1,0 +1,9 @@
+# Local prompt tracing (agent/tracing.py). Optional -- TRACE=file needs nothing.
+#
+#   uv pip install -r requirements-trace.txt
+#
+# Only needed for TRACE=phoenix, which adds a browsable UI on localhost:6006.
+# Install it AFTER requirements.txt and re-check `openai` afterwards: phoenix
+# pulls a newer one than langchain-openai supports.
+arize-phoenix>=20.0
+openinference-instrumentation-langchain>=0.1.29
