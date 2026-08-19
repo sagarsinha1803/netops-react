@@ -7,6 +7,7 @@ request already carries: CMDB source -> CMDB destination -> ping -> traceroute
     python tests/fake_llm.py 11499
 """
 import json
+import os
 import re
 import sys
 import time
@@ -177,6 +178,12 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"] or 0)))
+        # NETOPS_SPY=<path> records every request, so a test can assert that
+        # nothing real ever reached the endpoint
+        spy = os.environ.get("NETOPS_SPY")
+        if spy:
+            with open(spy, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(body) + "\n")
         msgs = body.get("messages") or []
         # count only this turn's tool results, so a second question in the same
         # conversation replays the script from the start

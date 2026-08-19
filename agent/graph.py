@@ -67,9 +67,15 @@ def build_llm():
     # temperature=0 because this agent picks commands that run on production
     # devices -- the same question must not produce a different command.
     from langchain_openai import ChatOpenAI
-    return ChatOpenAI(base_url=C.LLM_BASE_URL, api_key=C.LLM_API_KEY,
-                      model=C.LLM_MODEL, temperature=0,
-                      timeout=C.LLM_TIMEOUT)
+    model = ChatOpenAI(base_url=C.LLM_BASE_URL, api_key=C.LLM_API_KEY,
+                       model=C.LLM_MODEL, temperature=0,
+                       timeout=C.LLM_TIMEOUT)
+    # The relay masks its own prompt; an API model has to be wrapped, or
+    # MASK_IPS would be silently ignored for every backend but the clipboard.
+    if ip_mask.enabled():
+        from agent.llm.masked_llm import MaskedChatModel
+        return MaskedChatModel(inner=model)
+    return model
 
 
 llm = build_llm()
