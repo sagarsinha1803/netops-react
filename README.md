@@ -30,15 +30,19 @@ netops-react/
 │                               validated IP only, nothing to inject)
 │
 ├── api/
-│   ├── main.py                 FastAPI + the /ws WebSocket protocol
+│   ├── main.py                 the REST endpoints + the SSE stream
+│   ├── models.py               Pydantic schemas -- these ARE the Swagger page
+│   ├── runs.py                 run store + the loop that drives the graph
 │   └── workflow.py             panel state, ported from the Chainlit UI
 │
 ├── frontend/                   Vite + React (no UI framework)
-│   └── src/App.jsx · Console.jsx · styles.css
+│   └── src/api.js · App.jsx · Console.jsx · ChatPanel.jsx · styles.css
 │                               agent console, not a chat: command bar,
 │                               stage strip, compact activity feed (reasoning
-│                               and raw output behind toggles), verdict card.
+│                               and raw output behind toggles), tabbed report
+│                               (Report / Path / Deep), optional chat drawer.
 │                               Light/dark theme button, persisted.
+│                               api.js is the ONLY place a URL appears.
 │
 └── tests/                      same suite as netops, plus test_local_probe.py
 ```
@@ -68,15 +72,38 @@ deliberately single-session.
 Open http://localhost:8000. The frontend is served by FastAPI from
 `frontend/dist`, so in normal use only one process runs.
 
-## The WebSocket protocol
+## The API
 
-One socket per tab: `/ws`. The client sends
-`{"type":"chat","text":…}`, `{"type":"deep_check"}` and
-`{"type":"approval","id":…,"approved":…}`; the server streams `thought`,
-`tool_result`, `approval_request`, `workflow` (full panel snapshot), `step`,
-`final`, `status` and `error` frames. No polling anywhere — the flicker and
-lag of the Chainlit sidebar (each update re-mounted the component) is gone
-by construction.
+Everything the UI does, it does over documented HTTP. **Swagger: http://localhost:8000/docs**
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | Backend mode, mocks, masking, active run |
+| `POST` | `/api/runs` | Start a run → `202` with a `run_id` |
+| `GET` | `/api/runs` | Recent runs |
+| `GET` | `/api/runs/{id}` | One run in full: progress, commands, verdict |
+| `GET` | `/api/runs/{id}/events` | SSE — the whole run object on every change |
+| `POST` | `/api/runs/{id}/approvals/{aid}` | Approve or reject the parked command |
+| `POST` | `/api/runs/{id}/deep` | Run the deeper diagnostics |
+| `POST` | `/api/ask` | A question, answered from run context |
+| `GET` | `/api/devices/{name}` | Direct CMDB lookup |
+
+A run executes in the background and is addressed by its id, so the browser can
+be closed and reopened mid-run, and any other system can drive the agent over
+plain HTTP. One run at a time (the clipboard relay is a single global
+resource); starting a second returns `409`.
+
+Drive one from the shell:
+
+```powershell
+$run = irm -Method POST http://localhost:8000/api/runs -ContentType application/json `
+  -Body '{"source":"10.10.1.20","destination":"172.20.5.10","protocol":"TCP","port":"443"}'
+irm "http://localhost:8000/api/runs/$($run.id)"        # poll; approve when it parks
+```
+
+**How it fits together — see [ARCHITECTURE.md](ARCHITECTURE.md)** for the whole
+application end to end: the graph, the guards, the three masking layers, the run
+store, and the frontend's state flow.
 
 ## The local fallback
 

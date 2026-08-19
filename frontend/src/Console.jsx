@@ -17,9 +17,13 @@ function CommandBar({ initial, busy, onRun }) {
 
   const run = () => {
     if (busy || !source.trim() || !dest.trim()) return;
-    onRun(
-      `troubleshoot ${source.trim()} to ${dest.trim()} ${protocol} ${String(port).trim() || "22"}`,
-    );
+    // the request body of POST /api/runs, verbatim
+    onRun({
+      source: source.trim(),
+      destination: dest.trim(),
+      protocol,
+      port: String(port).trim() || "22",
+    });
   };
   const onKey = (e) => e.key === "Enter" && run();
 
@@ -206,16 +210,16 @@ function WaitLine({ waiting }) {
 }
 
 // ---------------------------------------------------------------- approval --
+// `approval` is the run's pending_approval field, straight from the API.
 function Approval({ approval, onApproval }) {
-  const p = approval.payload || {};
   return (
     <div className="approval">
       <div className="what">
         <div className="t">Approval required</div>
-        <div className="c mono">{String(p.command || "")}</div>
+        <div className="c mono">{String(approval.command || "")}</div>
         <div className="w">
-          on {String(p.device_ip || "?")}
-          {p.region ? ` · ${p.region}` : ""} · read-only, validated in code
+          on {String(approval.device_ip || "?")}
+          {approval.region ? ` · ${approval.region}` : ""} · read-only, validated in code
         </div>
       </div>
       <button className="ok" onClick={() => onApproval(approval.id, true)}>
@@ -417,22 +421,35 @@ function Report({ final, busy, deepRunning, onDeep }) {
 }
 
 // ----------------------------------------------------------------- console --
+// Everything below is derived from ONE run object as the API returns it
+// (GET /api/runs/{id}); the component holds no state of its own beyond which
+// panels are open.
 export default function Console({
-  wf, busy, clip, status, approval, final, notice, deepRunning,
-  onRun, onApproval, onDeep,
+  run, busy, clip, notice, onRun, onApproval, onDeep,
 }) {
   const [showWhy, setShowWhy] = useState(false);
+
+  const wf = run && run.workflow;
+  const approval = run && run.pending_approval;
+  const deepRunning = !!run && run.kind === "deep" && busy;
+  const final =
+    run && (run.report || run.deep_report || run.answer)
+      ? {
+          report: run.report,
+          deepReport: run.deep_report,
+          answer: run.answer,
+          offerDeep: run.offer_deep,
+        }
+      : null;
 
   const started = wf && wf.steps && wf.steps.some((s) => s.status !== "pending");
   const hasFeed = wf && ((wf.basics || []).length || (wf.checks || []).length);
 
   const waiting =
     busy && !approval
-      ? status.state === "waiting_clipboard"
+      ? run.status === "waiting_clipboard"
         ? "Prompt on clipboard — paste into Copilot, copy the reply back"
-        : status.state === "executing"
-          ? `Executing ${status.detail}`
-          : "Working…"
+        : "Working…"
       : null;
 
   return (
