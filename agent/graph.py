@@ -63,9 +63,13 @@ def build_llm():
         # CLIP_MODE=delta -> one normal Copilot chat, only new messages pasted
         # CLIP_MODE=full  -> self-contained paste every time
         return ClipboardLLM(mode=C.CLIP_MODE)
+    # Any OpenAI-compatible endpoint: vLLM, GitHub Models, Ollama, a gateway.
+    # temperature=0 because this agent picks commands that run on production
+    # devices -- the same question must not produce a different command.
     from langchain_openai import ChatOpenAI
-    return ChatOpenAI(base_url=C.LLM_BASE_URL, api_key="dummy",
-                      model=C.LLM_MODEL, temperature=0)
+    return ChatOpenAI(base_url=C.LLM_BASE_URL, api_key=C.LLM_API_KEY,
+                      model=C.LLM_MODEL, temperature=0,
+                      timeout=C.LLM_TIMEOUT)
 
 
 llm = build_llm()
