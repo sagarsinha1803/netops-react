@@ -31,9 +31,18 @@ def check(name, cond, detail=""):
 
 
 class Recorder(BaseChatModel):
-    """A stand-in endpoint: records what it was sent, replies with a tool call."""
+    """A stand-in endpoint: records what it was sent, replies with a tool call.
+
+    bind_tools is deliberately NOT overridden. The real ChatOpenAI returns a
+    RunnableBinding from it, whose _generate is reached through __getattr__ and
+    silently drops the bound kwargs -- so a wrapper that binds the inner model
+    offers the endpoint no tools at all, and the agent runs nothing. Inheriting
+    the base implementation reproduces that, which is what the kwargs check
+    below is for.
+    """
 
     seen: list = []
+    kwargs_seen: list = []
     reply: Any = None
 
     @property
@@ -43,10 +52,8 @@ class Recorder(BaseChatModel):
     def _generate(self, messages: List, stop: Optional[List[str]] = None,
                   run_manager=None, **kwargs) -> ChatResult:
         self.seen.append(messages)
+        self.kwargs_seen.append(kwargs)
         return ChatResult(generations=[ChatGeneration(message=self.reply)])
-
-    def bind_tools(self, tools, **kwargs):
-        return self
 
 
 REAL_SRC, REAL_DST, REAL_HOP = "10.10.1.20", "172.20.5.10", "10.10.1.1"
@@ -70,8 +77,15 @@ recorder = Recorder(reply=AIMessage(
                           "commands": [f"ping {masked_dst} repeat 3"],
                           "region": "INDIA"}}]))
 
+TOOL = {"type": "function",
+        "function": {"name": "execute_query_on_server",
+                     "description": "Run read-only CLI on a device",
+                     "parameters": {"type": "object",
+                                    "properties": {"device_ip": {"type": "string"}},
+                                    "required": ["device_ip"]}}}
+
 llm = MaskedChatModel(inner=recorder)
-bound = llm.bind_tools([])                 # binding must not unwrap the masking
+bound = llm.bind_tools([TOOL])             # binding must not unwrap the masking
 check("bind_tools keeps the wrapper", isinstance(bound, MaskedChatModel))
 
 conversation = [
@@ -100,6 +114,14 @@ check("no real value reaches the endpoint", not leaked, f"leaked={leaked}")
 check("the whole history is masked, not just the last message",
       REAL_SRC not in blob and CMDB not in blob)
 check("stand-ins did arrive", mask.mask(REAL_DST) in blob)
+
+# The tools must survive the wrapper. Losing them is silent: the endpoint is
+# simply never offered any, the model answers in prose, and the agent runs
+# nothing while looking like it is working.
+sent_kwargs = recorder.kwargs_seen[-1]
+check("bound tools reach the endpoint",
+      [t["function"]["name"] for t in sent_kwargs.get("tools") or []]
+      == ["execute_query_on_server"], str(sent_kwargs.get("tools")))
 
 # ---- incoming: the graph gets reality back --------------------------------
 check("reply content is unmasked", REAL_DST in str(result.content),
