@@ -23,6 +23,7 @@ from langchain_core.callbacks import (AsyncCallbackManagerForLLMRun,
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatResult
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 
 from agent.llm import ip_mask
@@ -63,6 +64,12 @@ class MaskedChatModel(BaseChatModel):
     """Delegates to `inner`, masking on the way out and unmasking on the way in."""
 
     inner: BaseChatModel = Field(...)
+    # What bind_tools() was given. Held here rather than by binding the inner
+    # model, because ChatOpenAI.bind_tools returns a RunnableBinding whose
+    # _generate is reached through __getattr__ -- which delegates to the model
+    # underneath and DROPS the bound kwargs. The tools would silently never be
+    # offered, and the agent would answer in prose instead of calling anything.
+    bind_kwargs: dict = Field(default_factory=dict)
 
     @property
     def _llm_type(self) -> str:
@@ -91,7 +98,8 @@ class MaskedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         result = self.inner._generate(self._outgoing(messages), stop=stop,
-                                      run_manager=run_manager, **kwargs)
+                                      run_manager=run_manager,
+                                      **{**self.bind_kwargs, **kwargs})
         return self._incoming(result)
 
     async def _agenerate(
@@ -102,14 +110,26 @@ class MaskedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         result = await self.inner._agenerate(self._outgoing(messages), stop=stop,
-                                             run_manager=run_manager, **kwargs)
+                                             run_manager=run_manager,
+                                             **{**self.bind_kwargs, **kwargs})
         return self._incoming(result)
 
-    # ---- pass-through -----------------------------------------------------
+    # ---- binding ----------------------------------------------------------
     def bind_tools(self, tools, **kwargs):
-        """Keep the wrapper on top: binding tools must not unwrap the masking.
+        """Record the tool schemas; keep the wrapper on top.
 
-        LangGraph calls bind_tools once per turn and uses what it returns, so a
-        wrapper that handed back the bare inner model here would mask nothing.
+        LangGraph calls this once per turn and uses what it returns, so a
+        wrapper that handed back the bare inner model would mask nothing --
+        and one that bound the inner model would lose the tools (see
+        bind_kwargs). The schemas are converted here, once, in the same
+        OpenAI shape ChatOpenAI would have produced.
         """
-        return self.model_copy(update={"inner": self.inner.bind_tools(tools, **kwargs)})
+        formatted = [convert_to_openai_tool(t) for t in tools]
+        return self.model_copy(
+            update={"bind_kwargs": {**self.bind_kwargs, "tools": formatted,
+                                    **kwargs}})
+
+    def bind(self, **kwargs):
+        """Same reasoning as bind_tools, for anything else bound onto the model."""
+        return self.model_copy(
+            update={"bind_kwargs": {**self.bind_kwargs, **kwargs}})
