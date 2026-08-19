@@ -101,8 +101,10 @@ CMDB knows neither address → the model is told (prompt routing rule) to use
 Local prompt tracing -- LangSmith without the cloud, nothing leaving the box:
 
 ```powershell
-$env:TRACE="file"; .un.ps1 -Mock          # data/prompt_trace.jsonl, no extra deps
-$env:TRACE="phoenix"; .un.ps1 -Mock       # the above + a UI on localhost:6006
+$env:TRACE="file"; .
+un.ps1 -Mock          # data/prompt_trace.jsonl, no extra deps
+$env:TRACE="phoenix"; .
+un.ps1 -Mock       # the above + a UI on localhost:6006
 ```
 
 Each entry is one model call: the messages that went out, the reply, any tool
@@ -110,9 +112,23 @@ calls, and how long it took. `TRACE_MASKED=1` records BOTH the real prompt and
 the masked one the endpoint actually received, side by side -- which is how you
 check the masking rather than trusting it.
 
-`TRACE=phoenix` needs `uv pip install -r requirements-trace.txt`. Watch the
-`openai` version afterwards: phoenix pulls a newer one than langchain-openai
-supports, and the only symptom is "Connection error" on every call.
+`TRACE=phoenix` adds a browsable UI -- spans, latencies, inputs and outputs per
+call. Start Phoenix FIRST, in its own terminal, and leave it running; the agent
+only sends traces to it:
+
+```powershell
+.venv\Scripts\phoenix.exe serve          # http://localhost:6006
+```
+
+Run it separately rather than in-process: launching it inside the agent takes
+long enough that Phoenix times out on itself, and it would die with the agent
+anyway. Kept apart, its history survives restarts. `PHOENIX_URL` points
+elsewhere if needed. If it is not running, the agent says so and carries on
+writing the file.
+
+It needs `uv pip install -r requirements-trace.txt` -- and watch the `openai`
+version afterwards: phoenix pulls a newer one than langchain-openai supports,
+and the only symptom is "Connection error" on every call.
 
 **The trace holds UNMASKED prompts** -- that is the point of it, and the reason
 `data/prompt_trace.jsonl` is gitignored. Delete it when you are done.
