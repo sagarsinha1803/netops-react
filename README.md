@@ -128,6 +128,23 @@ It needs `uv pip install -r requirements-trace.txt` -- and watch the `openai`
 version afterwards: phoenix pulls a newer one than langchain-openai supports,
 and the only symptom is "Connection error" on every call.
 
+### Reading the trace
+
+Three ways, easiest first. None of them needs Phoenix:
+
+```powershell
+py tools\show_trace.py --masked      # the last run, in the terminal
+```
+
+or open **http://localhost:8000/trace** while the app is running -- the same
+thing as a page, turn by turn, with a toggle for the masked half. It refreshes
+every 5s, so you can leave it open beside the console.
+
+`TRACE=phoenix` is the third: a full observability product with projects,
+spans, latency percentiles and evaluators. Worth it when the question is "why
+was this slow" or "show me every run last week"; heavier than needed for
+"what did it send".
+
 ### Why the traces show real addresses
 
 Both tracers sit INSIDE the masking boundary: they record what the agent is
