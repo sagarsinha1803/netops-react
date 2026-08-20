@@ -86,9 +86,17 @@ function StageStrip({ wf }) {
           </React.Fragment>
         ))}
       </div>
+      {wf && wf.cmdbMiss && (
+        <div className="substatus">
+          <span className="warn">
+            ⚠ source not in CMDB — no device to run commands on, so the
+            firewall policy is the only check available
+          </span>
+        </div>
+      )}
       {wf && wf.local && (
         <div className="substatus">
-          <span className="warn">⚠ source not in CMDB — probing from the agent machine</span>
+          <span className="warn">⚠ probed from the agent machine, not the source</span>
         </div>
       )}
     </div>
@@ -288,7 +296,8 @@ function ReportBody({ report, answer }) {
       </div>
       {local && (
         <div className="local-note">
-          ⚠ Probed from the agent machine — policy on the real path is unverified.
+          ⚠ Probed from the agent machine, not the source — this says whether
+          THIS host can reach the destination, not whether the source can.
         </div>
       )}
       {!skip(report.cause) && (

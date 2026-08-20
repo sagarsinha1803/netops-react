@@ -78,23 +78,37 @@ One socket per tab: `/ws`. The client sends
 lag of the Chainlit sidebar (each update re-mounted the component) is gone
 by construction.
 
-## The local fallback
+## When the CMDB has no record
 
-CMDB knows neither address → the model is told (prompt routing rule) to use
-`local_ping` / `local_traceroute` and to **skip SSH and Tufin**:
+Ping and traceroute only mean anything **run on the source device**, and
+reaching it needs the management address and region that the CMDB record
+carries. No record → no device to SSH to. So the agent:
 
-- The tools take an **IP address argument only**, validated with `ipaddress`;
-  the command line is assembled in code (`ping -n 3 -w 1000 <ip>` /
-  `tracert -d -h 5 -w 1000 <ip>` on Windows). The model never writes a
-  command string, so the read-only guard has nothing to reject and there is
-  no injection surface.
-- They are still **approval-gated** like every other probe (the `local`
-  server is in `DEVICE_SERVERS`), and audited as `agent host`.
-- The report and the panel carry a visible warning that the probe ran from
-  the agent machine, so a clean ping does **not** claim the real source can
-  reach the destination.
-- Source in CMDB but destination missing → normal workflow: the source
-  device can ping whatever address it is given.
+- runs **no device command** — nothing to run it on;
+- does **not** substitute a probe from the agent machine. A ping from here
+  answers "can this box reach it", which is a different question and reads
+  like an answer to the one that was asked;
+- **does** call Tufin. `get_firewall_path` works from the two addresses alone
+  — it models the topology and the policy and needs no CMDB record — so the
+  firewall verdict is still available, and is the whole of what can be
+  established.
+
+The report says so plainly: ping `NOT RUN`, source `<ip> (not in CMDB)`, the
+verdict taken from the policy result, and a next step of adding the device to
+the CMDB. The panel shows the CMDB stage failed, with a note that the policy
+check is the only one available.
+
+Only the DESTINATION missing → normal workflow: the source device can ping
+whatever address it is given.
+
+### Probing from the agent machine
+
+`mcp_tools/local_probe_mcp.py` (`local_ping`, `local_traceroute`) still exists
+but is **off by default**, because the reading above is what it produces:
+evidence about this host presented as evidence about the source. Set
+`LOCAL_PROBES=1` to offer the tools when that is genuinely what you want —
+they take a validated IP argument only, the command line is assembled in code,
+and they stay approval-gated and audited as `agent host`.
 
 ## Watching the prompts
 

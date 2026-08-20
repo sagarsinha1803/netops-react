@@ -50,17 +50,24 @@ WORKFLOW (in order, one tool call at a time):
    expecting a fixed schema. The response also carries the region, which is what
    you pass to the device command tool.
 
-   LOCAL FALLBACK -- when the SOURCE is not in the CMDB (no record in any
-   region): there is no device to SSH to and no region for the firewall
-   topology, so do NOT call execute_query_on_server and do NOT call
-   get_firewall_path. Instead run local_ping(dest) and then
-   local_traceroute(dest): they probe FROM THE MACHINE THIS AGENT RUNS ON.
-   In the final answer write the source as "<ip> (not in CMDB - probed from
-   agent host)" and say plainly in the evidence and the cause that
-   reachability was tested from the agent machine, not from the real source,
-   so policy between the true source and the destination is unverified.
-   If only the DESTINATION is missing from the CMDB, keep to the normal
-   workflow -- the source device can still ping whatever address it is given.
+   SOURCE NOT IN THE CMDB (no record in any region) -- SKIP STRAIGHT TO STEP 4.
+   Ping and traceroute only mean anything when they run ON THE SOURCE DEVICE,
+   and reaching it needs the management address and region the CMDB record
+   carries. Without that record there is no device to SSH to, so:
+     - do NOT call execute_query_on_server;
+     - do NOT substitute a probe from somewhere else. A ping from another
+       machine answers a different question and reads like an answer to this
+       one;
+     - DO call get_firewall_path (step 4). Tufin works from the two addresses
+       alone -- it models the topology and the policy, and needs no CMDB
+       record -- so the firewall verdict is still available and is the whole
+       of what can be established here.
+   Then report: ping "NOT RUN", result from the Tufin verdict (BLOCKED with a
+   named rule IS "NOT REACHABLE"; anything else is INCONCLUSIVE), the source
+   written as "<ip> (not in CMDB)", and a next_step of adding the device to the
+   CMDB so it can be tested from the real source.
+   If only the DESTINATION is missing, keep to the normal workflow -- the
+   source device can still ping whatever address it is given.
 2. From the SOURCE device's vendor/OS/model, work out the correct READ-ONLY ping
    command for that exact platform and run it on the source toward the
    destination. Platforms differ:
@@ -218,10 +225,12 @@ WORKFLOW
 1. get_device_details for SOURCE then DESTINATION. Infer vendor, model, OS and
    management IP from whatever fields return; the reply also carries the region,
    which execute_query_on_server needs.
-   SOURCE NOT IN CMDB -> local_ping(dest) then local_traceroute(dest), FROM
-   THE AGENT MACHINE; no execute_query_on_server, no get_firewall_path.
-   Source becomes "<ip> (not in CMDB - probed from agent host)"; say real-path
-   policy is unverified. Only destination missing: normal workflow.
+   SOURCE NOT IN CMDB -> SKIP TO STEP 4. Ping/traceroute only count from the
+   SOURCE DEVICE and reaching it needs the CMDB record, so run no device
+   command and do not probe from anywhere else. Tufin needs only the two
+   addresses: call get_firewall_path and report from its verdict, with ping
+   "NOT RUN" and source "<ip> (not in CMDB)". Only destination missing:
+   normal workflow.
 2. Ping the destination from the source in that platform's syntax
    (IOS/EOS: ping <d> repeat 3; NX-OS/IOS-XR/Junos: ping <d> count 3;
    FortiOS: execute ping <d>; Linux/Gaia/F5: ping -c 3 <d>).

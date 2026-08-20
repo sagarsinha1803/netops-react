@@ -497,8 +497,11 @@ INSTRUCTION_LIMIT = 7000
 
 # The agent only ever calls these. A mock run also exposes calculator,
 # word_length and get_device, which would just be noise in the instructions.
+# The tools the agent always has. The local probes are optional (LOCAL_PROBES)
+# and are included only when they were actually loaded, so their absence is
+# not reported as something missing.
 AGENT_TOOLS = ("get_device_details", "get_firewall_path",
-               "execute_query_on_server", "local_ping", "local_traceroute")
+               "execute_query_on_server")
 
 if __name__ == "__main__":
     import asyncio
@@ -511,8 +514,11 @@ if __name__ == "__main__":
     from agent import prompts
 
     tools = asyncio.run(MultiServerMCPClient(C.MCP_SERVERS).get_tools())
+    def wanted(name):
+        return name in AGENT_TOOLS or name.startswith("local_")
+
     schemas = [convert_to_openai_tool(t) for t in tools
-               if getattr(t, "name", "") in AGENT_TOOLS]
+               if wanted(getattr(t, "name", ""))]
     missing = set(AGENT_TOOLS) - {s["function"]["name"] for s in schemas}
 
     # always the compact prompt: the agent instructions ARE the system prompt,

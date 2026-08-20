@@ -8,6 +8,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# The local probes are OFF by default -- the CMDB-miss path goes to Tufin, not
+# to a probe from this machine. They stay available behind the flag, so the
+# tests set it before importing the config that reads it.
+os.environ["LOCAL_PROBES"] = "1"
+
 from agent import constants as C                       # noqa: E402
 from agent import vendors                              # noqa: E402
 from agent.utils import display_command, tool_text     # noqa: E402
@@ -64,7 +69,7 @@ check("probe result flattens like an ssh result",
       flat.startswith("# ping -n 3") and "Received = 3" in flat, flat[:40])
 
 # ---- wiring ------------------------------------------------------------------
-check("local server is registered", "local" in C.MCP_SERVERS)
+check("local server is registered when LOCAL_PROBES=1", "local" in C.MCP_SERVERS)
 check("local probes are approval-gated", "local" in C.DEVICE_SERVERS)
 check("local tools are traced as device tools",
       {"local_ping", "local_traceroute"} <= C.DEVICE_TOOL_NAMES)
