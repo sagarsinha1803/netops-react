@@ -424,6 +424,13 @@ async def ws_endpoint(ws: WebSocket):
             t.cancel()
 
 
+# ------------------------------------------------------------- trace viewer --
+# A plain page for reading data/prompt_trace.jsonl at /trace -- registered
+# before the static mount, which otherwise swallows the path.
+from api import trace_view                              # noqa: E402
+trace_view.register(app)
+
+
 # ------------------------------------------------------------- static files --
 # Mounted last so /ws and /api win. html=True serves index.html at "/".
 _DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
