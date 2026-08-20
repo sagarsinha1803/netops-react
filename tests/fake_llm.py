@@ -231,7 +231,8 @@ class H(BaseHTTPRequestHandler):
                 name, args = _retarget(LOCAL_SCRIPT[done], src, dst)
                 msg = _msg(LOCAL_THOUGHTS[done], name, args)
             else:
-                msg = _msg(json.dumps(LOCAL_FINAL))
+                msg = _msg(json.dumps(_retarget(("final", LOCAL_FINAL),
+                                                src, dst)[1]))
         elif deep:
             step = done
             if 0 <= step < len(DEEP):

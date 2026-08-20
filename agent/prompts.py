@@ -24,6 +24,10 @@ C. DEEPER CHECKS, only when they are asked for explicitly. Use
    execute_query_on_server alone, choosing the commands from the source device's
    vendor, model and OS. Do NOT repeat the ping or the traceroute, and do not
    call the CMDB or Tufin again -- you already have what they returned.
+   If the SOURCE has no CMDB record, deeper checks are NOT POSSIBLE: they are
+   show commands that run on that device and there is no address or region to
+   reach it with. Say so plainly, name adding the device to the CMDB as the
+   way to make them possible, and call no tools.
 D. ANYTHING ELSE -- a greeting, a capability question, a general networking
    question. Answer from your own knowledge with "final" and call NO tools.
 
@@ -210,7 +214,8 @@ A. DEVICE DETAILS for one device: get_device_details ONLY, then report it. No
 B. TROUBLESHOOT, source AND destination both named: the WORKFLOW below, in order.
 C. DEEPER CHECKS, only when asked for: execute_query_on_server alone, commands
    chosen from the source vendor/model/OS. Do NOT repeat the ping or traceroute,
-   or call the CMDB or Tufin again.
+   or call the CMDB or Tufin again. Source not in the CMDB -> deeper checks are
+   NOT POSSIBLE (no device to run them on): say so, call no tools.
 D. ANYTHING ELSE - greeting, general question: answer with "final", NO tools.
 Never invent placeholder arguments; ask for anything missing.
 
@@ -287,6 +292,10 @@ do not use that schema: "final" is then a plain string, answered briefly.
 """
 
 DEEP_CHECK_PROMPT = (
+    "If the SOURCE has no CMDB record, stop here: these checks are show "
+    "commands that run on the source device and there is no address or region "
+    "to reach it with. Call no tools, say that plainly, and give adding the "
+    "device to the CMDB as the next step. Otherwise: "
     "The ping and the traceroute for this source and destination have ALREADY "
     "run and their output is above. Do NOT run either of them again. "
     "Work out from the source device's vendor, model and OS which deeper checks "
