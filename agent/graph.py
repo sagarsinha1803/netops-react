@@ -237,7 +237,12 @@ async def build_agent(checkpointer=None):
                               or ("agent host" if name.startswith("local_") else None),
                               "command": display_command(name, args),
                               "approved": gate is True})
-            else:                                   # lookup tools -> remember the record
+            elif "device_details" in name or "get_device" in name:
+                # CMDB lookups only. Filing EVERY non-device tool here put
+                # Tufin's reply in the device map under "?" -- and since a
+                # policy reply is a JSON object, the panel counted it as a
+                # device that had been found, so a run where nothing was in
+                # the CMDB reported "1 found" and kept its green tick.
                 key = args.get("device_name") or args.get("device_ip") or "?"
                 devices[key] = text
 

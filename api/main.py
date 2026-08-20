@@ -359,9 +359,14 @@ async def run_turn(sess: Session, text: str, show_commands=False):
 
     ping_ok = state.get("ping_ok")
     unresolved = ping_ok is False or not (state.get("hops") or [])
+    # Deeper checks are show commands run ON the source device. Without a CMDB
+    # record there is no management address or region to reach it with, so
+    # there is nothing to dig into -- offering the button would promise work
+    # the agent cannot do. Same for a run whose probes came from this host.
     offer = (workflow_turn and wf.scope == "path" and unresolved
              and not show_commands
-             and not wf.local)          # no device to dig into on a local run
+             and not wf.local
+             and not wf.cmdb_miss)
 
     await sess.status("idle")
     await sess.send({"type": "final", "answer": str(answer),

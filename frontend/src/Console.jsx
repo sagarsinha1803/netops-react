@@ -328,7 +328,7 @@ const REPORT_TABS = [
   { key: "deep", label: "Deep" },
 ];
 
-function Report({ final, busy, deepRunning, onDeep }) {
+function Report({ final, busy, deepRunning, cmdbMiss, onDeep }) {
   const rep = final.report || {};
   const verdict = rep.result || (rep.text || final.answer ? "ANSWER" : "?");
   const cls = verdictClass(rep.result);
@@ -409,7 +409,9 @@ function Report({ final, busy, deepRunning, onDeep }) {
                 <p className="hint">
                   {final.offerDeep
                     ? "Reachability is unconfirmed. Dig into the route, VRF, forwarding entry, next hop, interface state and ACLs — one check at a time."
-                    : "No deeper checks were run for this result."}
+                    : cmdbMiss
+                      ? "Not available: the source is not in the CMDB, so there is no device to run show commands on. The firewall verdict above is all that can be established."
+                      : "No deeper checks were run for this result."}
                 </p>
                 {final.offerDeep && !busy && (
                   <button className="deep-btn" onClick={onDeep}>
@@ -471,7 +473,7 @@ export default function Console({
         )}
         {final && (
           <Report final={final} busy={busy} deepRunning={deepRunning}
-                  onDeep={onDeep} />
+                  cmdbMiss={!!(wf && wf.cmdbMiss)} onDeep={onDeep} />
         )}
       </div>
     </div>
