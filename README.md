@@ -130,8 +130,23 @@ It needs `uv pip install -r requirements-trace.txt` -- and watch the `openai`
 version afterwards: phoenix pulls a newer one than langchain-openai supports,
 and the only symptom is "Connection error" on every call.
 
-**The trace holds UNMASKED prompts** -- that is the point of it, and the reason
-`data/prompt_trace.jsonl` is gitignored. Delete it when you are done.
+### Why the traces show real addresses
+
+Both tracers sit INSIDE the masking boundary: they record what the agent is
+reasoning about, which is the real estate. Masking happens after that, in
+`MaskedChatModel`, on the way out to the endpoint. Seeing `10.10.1.20` in
+Phoenix is therefore expected and is NOT a sign that masking has failed.
+
+To see the other half, each traced call also emits a span named **"masked
+prompt (sent to endpoint)"** carrying exactly what left the machine. Open the
+two side by side and the question answers itself:
+
+    llm  MaskedChatModel                 ping 172.20.5.10 repeat 3
+    chain  masked prompt (sent to ...)   ping ip4.n2.h10 repeat 3
+
+**Both stores hold UNMASKED prompts** -- that is the point of them, and the
+reason `data/prompt_trace.jsonl` is gitignored. Phoenix keeps its own local
+database too: do not export it or hand it to anyone. Delete both when done.
 
 ## Safety — unchanged from netops
 

@@ -40,6 +40,38 @@ def _walk(value, fn):
         return [_walk(v, fn) for v in value]
     return value
 
+
+def _attach_to_span(masked_messages):
+    """Put the masked prompt on the current span, for Phoenix.
+
+    Phoenix instruments the OUTER model, which is the unmasked side -- its
+    input_messages are the real addresses and hostnames, by design, because
+    that is what the agent is reasoning about. Useful for debugging the agent,
+    but it means the trace UI cannot answer "is masking working", and someone
+    looking at it reasonably concludes that it is not.
+
+    So the same span also carries what the endpoint was actually sent. Both
+    halves, one place, and the answer is a glance rather than an argument.
+    """
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        return
+    # A span of our own rather than set_attribute on the current one: the
+    # callback does not run inside the instrumentor's LLM span, so attributes
+    # written there land on a non-recording span and vanish silently.
+    body = json.dumps(masked_messages, ensure_ascii=False, default=str)
+    try:
+        tracer = trace.get_tracer("netops.masking")
+        with tracer.start_as_current_span("masked prompt (sent to endpoint)") as span:
+            span.set_attribute("masking.enabled", True)
+            span.set_attribute("input.value", body[:24000])
+            span.set_attribute("input.mime_type", "application/json")
+            # openinference kind, so Phoenix renders it as a readable step
+            span.set_attribute("openinference.span.kind", "CHAIN")
+    except Exception:
+        pass
+
 TRACE = os.environ.get("TRACE", "").strip().lower()
 TRACE_MASKED = os.environ.get("TRACE_MASKED", "").strip().lower() in ("1", "true", "yes")
 TRACE_FILE = os.environ.get(
@@ -107,6 +139,7 @@ class FileTracer(BaseCallbackHandler):
                 from agent.llm import ip_mask
                 mask = ip_mask.session_mask()
                 entry["sent"] = _walk(entry["messages"], mask.mask)
+                _attach_to_span(entry["sent"])
             except Exception as e:
                 print(f"[trace] could not mask the sent copy: {e}", file=sys.stderr)
         self._write(entry)
