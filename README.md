@@ -101,10 +101,8 @@ CMDB knows neither address → the model is told (prompt routing rule) to use
 Local prompt tracing -- LangSmith without the cloud, nothing leaving the box:
 
 ```powershell
-$env:TRACE="file"; .
-un.ps1 -Mock          # data/prompt_trace.jsonl, no extra deps
-$env:TRACE="phoenix"; .
-un.ps1 -Mock       # the above + a UI on localhost:6006
+$env:TRACE="file"; $env:TRACE_MASKED="1"; .\run.ps1 -Mock   # data/prompt_trace.jsonl
+$env:TRACE="phoenix"; .\run.ps1 -Mock                       # + UI on localhost:6006
 ```
 
 Each entry is one model call: the messages that went out, the reply, any tool
