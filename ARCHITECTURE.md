@@ -20,8 +20,8 @@ are the map.
                        │    Workflow   api/workflow.py│   SSE  │  ssh MCP   │  devices
                        │            │                 │───────▶│ via bastion│
                        │            ▼                 │        ├────────────┤
-                       │  LangGraph agent    agent/   │  stdio │ local probe│  this host
-                       │    ├─ guards.py  (read-only) │───────▶│  MCP       │
+                       │  LangGraph agent    agent/   │  stdio │ local probe│  off by
+                       │    ├─ guards.py  (read-only) │╌╌╌╌╌╌▶│  MCP       │  default
                        │    ├─ masking    (3 layers)  │        └────────────┘
                        │    └─ LLM: Copilot relay/API │
                        └──────────────────────────────┘
@@ -151,18 +151,24 @@ The system prompt routes every request into one of four, and only one:
 5. **Stop and report.** The workflow *ends* at Tufin. Deeper checks are extra
    commands on production devices, so they are the user's call.
 
-### The local fallback (no CMDB record)
+### No CMDB record for the source
 
-If the source is not in the CMDB there is no device to SSH to and no region for
-the firewall topology. The prompt routes to `local_ping` / `local_traceroute`
-(`mcp_tools/local_probe_mcp.py`), which run on *this* machine, and skips SSH and
-Tufin entirely.
+Ping and traceroute only mean anything run ON the source device, and reaching
+it needs the management address and region from the CMDB record. Without one
+there is no device to SSH to, so the agent runs no device command and does not
+substitute a probe from elsewhere — a ping from the agent host answers "can
+this box reach it", which is a different question wearing the same clothes.
 
-Those tools take a **validated IP address and nothing else** — the command line
-is assembled in code, so the model never writes a command string and there is
-nothing to inject. They are still approval-gated, and the report says plainly
-that reachability was tested from the agent host, so a clean ping is never
-mistaken for proof about the real source.
+Tufin still works: `get_firewall_path` takes the two addresses, models the
+topology and the policy, and needs no CMDB record. So the run goes CMDB →
+CMDB → Tufin → report, with ping `NOT RUN` and the verdict resting on policy
+alone.
+
+`mcp_tools/local_probe_mcp.py` implements probes from the agent host and is
+kept, but `LOCAL_PROBES` defaults to off so the tools are not even offered to
+the model. Turned on, they take a validated IP argument only — the command
+line is assembled in code, so the model never writes a command string — and
+they remain approval-gated.
 
 ### The LLM: two backends, one interface
 

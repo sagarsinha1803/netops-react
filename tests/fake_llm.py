@@ -51,42 +51,40 @@ SCRIPT = [
 ]
 
 # the manager scenario: two addresses the CMDB does not know. The script
-# looks both up, gets nothing back, and switches to the local probes --
-# no execute_query_on_server, no Tufin.
+# looks both up, gets nothing back, and goes straight to Tufin -- no device
+# command, because there is no device to SSH to, and no probe from elsewhere.
 LOCAL_SCRIPT = [
     ("get_device_details", {"device_name": "198.51.100.5"}),
     ("get_device_details", {"device_name": "8.8.8.8"}),
-    ("local_ping", {"dest": "8.8.8.8", "count": 3}),
-    ("local_traceroute", {"dest": "8.8.8.8", "max_hops": 5}),
+    ("get_firewall_path", {"src": "198.51.100.5", "dst": "8.8.8.8",
+                           "service": "any"}),
 ]
 
 LOCAL_THOUGHTS = [
     "Looking up the source in the CMDB.",
-    "Source is not in the CMDB. Checking the destination before deciding how "
-    "to probe.",
-    "Neither address is in the CMDB, so there is no device to SSH to and no "
-    "topology for Tufin. Falling back to probing from the agent machine.",
-    "Ping from the agent host succeeded. Tracing the path from here, bounded "
-    "to 5 hops.",
+    "Source is not in the CMDB. Checking the destination too.",
+    "No record for the source, so there is no management address or region to "
+    "SSH to -- ping and traceroute only mean anything run ON the source, so "
+    "they are skipped. Tufin needs only the two addresses, so the policy "
+    "check is still available.",
 ]
 
 LOCAL_FINAL = {
-    "source": "198.51.100.5 (not in CMDB - probed from agent host)",
+    "source": "198.51.100.5 (not in CMDB)",
     "destination": "8.8.8.8 (not in CMDB)",
-    "ping": "SUCCESS",
-    "path": ["agent host", "192.168.1.1", "100.72.16.1", "8.8.8.8"],
-    "result": "REACHABLE",
+    "ping": "NOT RUN",
+    "path": ["198.51.100.5", "?", "8.8.8.8"],
+    "result": "NOT REACHABLE",
     "evidence": [
         "CMDB lookup for 198.51.100.5 -> no record in any region",
         "CMDB lookup for 8.8.8.8 -> no record in any region",
-        "local ping 8.8.8.8 -> 3/3 replies (from the AGENT HOST)",
-        "local tracert -> 3 hops, destination answered",
+        "no device to SSH to, so no ping and no traceroute were run",
+        "Tufin get_firewall_path any -> BLOCKED by ACL DENY-ALL",
     ],
-    "cause": "8.8.8.8 answers from the agent machine. The real source is not "
-             "in the CMDB, so nothing was tested from it - policy between "
-             "198.51.100.5 and 8.8.8.8 is unverified.",
-    "next_step": "Add the source device to the CMDB (or name a device that "
-                 "is) to test from the real source.",
+    "cause": "Denied by policy: ACL DENY-ALL blocks the pair. Nothing was "
+             "tested from the source itself, since it is not in the CMDB.",
+    "next_step": "Add the source device to the CMDB so the path can be tested "
+                 "from it, and raise a change request for the ACL.",
 }
 
 # a second turn ("run deeper checks") continues from step 4
@@ -121,7 +119,18 @@ THOUGHTS = [
 ]
 
 
-_REQUEST_RE = re.compile(r"[\w.\-]+\s+to\s+[\w.\-]+", re.I)
+_REQUEST_RE = re.compile(r"troubleshoot\s+([\w.\-]+)\s+to\s+([\w.\-]+)", re.I)
+
+
+def _retarget(step, src, dst):
+    """Point a scripted step at the pair actually being asked about."""
+    name, args = step
+    out = json.loads(json.dumps(args)
+                     .replace("10.10.1.20", src)
+                     .replace("172.20.5.10", dst)
+                     .replace("198.51.100.5", src)
+                     .replace("8.8.8.8", dst))
+    return name, out
 
 
 def _answer_from_context(asked: str, msgs) -> dict:
@@ -139,9 +148,10 @@ def _answer_from_context(asked: str, msgs) -> dict:
                   "DC1 edge drops it. The route and the path are fine up to "
                   "FW-DC1-EDGE-01 - the traffic is denied by policy, not lost.")
     elif "not in CMDB" in seen or "No data found" in seen:
-        answer = ("Neither address is in the CMDB, so the checks ran from the "
-                  "agent machine. That proves the destination answers from "
-                  "here, not that the real source can reach it.")
+        answer = ("Neither address is in the CMDB, so there was no device to "
+                  "SSH to and no ping or traceroute was run. Only the firewall "
+                  "policy could be checked, and that is what the verdict rests "
+                  "on.")
     elif "next" in q or "check" in q:
         answer = ("Next: confirm the ACL hit counter is rising "
                   "(show access-lists EDGE-OUT | include 172.20.5.10), then "
@@ -192,8 +202,13 @@ class H(BaseHTTPRequestHandler):
         turn = msgs[last_user:]
         done = sum(1 for m in turn if m.get("role") == "tool")
         deep = "run either of them again" in json.dumps(turn)
-        # the CMDB-miss scenario is keyed on its documentation-range source
-        local = "198.51.100" in json.dumps(turn)
+        # The CMDB-miss scenario is recognised the way the real model would:
+        # from the CMDB's own reply. Keying on the literal address stopped
+        # working once masking reached API models too -- the endpoint sees a
+        # stand-in, never 198.51.100.5.
+        tool_results = json.dumps([m.get("content") for m in turn
+                                   if m.get("role") == "tool"])
+        local = "No data found" in tool_results
         # A chat question -- route D in the prompt: answer from the conversation
         # so far, no tools. Recognised the way the real model would: the request
         # names no source AND destination.
@@ -202,11 +217,18 @@ class H(BaseHTTPRequestHandler):
         question = (not deep and not _REQUEST_RE.search(asked)
                     and asked.strip().endswith("?"))
 
+        # Whatever pair the caller asked about. The agent unmasks arguments on
+        # the way to the tools, so echoing back the stand-ins it sent is
+        # correct -- and it means this endpoint drives ANY addresses, not the
+        # two that happen to be written into the script.
+        pair = _REQUEST_RE.search(asked or json.dumps(turn))
+        src, dst = (pair.group(1), pair.group(2)) if pair else ("SOURCE", "DEST")
+
         if question:
             msg = _msg(json.dumps(_answer_from_context(asked, msgs)))
         elif local and not deep:
             if done < len(LOCAL_SCRIPT):
-                name, args = LOCAL_SCRIPT[done]
+                name, args = _retarget(LOCAL_SCRIPT[done], src, dst)
                 msg = _msg(LOCAL_THOUGHTS[done], name, args)
             else:
                 msg = _msg(json.dumps(LOCAL_FINAL))
@@ -235,7 +257,7 @@ class H(BaseHTTPRequestHandler):
                 })
                 msg = _msg(json.dumps(deep_final))
         elif done < len(SCRIPT):
-            name, args = SCRIPT[done]
+            name, args = _retarget(SCRIPT[done], src, dst)
             msg = _msg(THOUGHTS[done], name, args)
         else:
             msg = _msg(json.dumps(FINAL))

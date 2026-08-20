@@ -52,7 +52,9 @@ class Workflow:
         self.title = title
         self.params = {}          # what the current run is actually about
         self.scope = "path"       # "path" = full workflow, "lookup" = CMDB only
-        self.local = False        # CMDB-miss fallback: probes ran on the agent host
+        self.local = False        # a probe ran on the agent host, not the source
+        self.cmdb_miss = False    # no CMDB record: no device to run commands on,
+                                  # so the run goes straight to the policy check
         self.checks = []          # deep-check commands
         self.basics = []          # the CMDB / ping / traceroute of the main run
         self.summary = {}         # ping_ok, path, hops -- parsed from raw CLI
@@ -75,7 +77,8 @@ class Workflow:
                 "checks": self.checks, "basics": self.basics,
                 "summary": self.summary, "report": self.report,
                 "deepReport": self.deep_report, "path": self.path,
-                "local": self.local, "maxDeep": C.DEEP_MAX_LOOPS}
+                "local": self.local, "cmdbMiss": self.cmdb_miss,
+                "maxDeep": C.DEEP_MAX_LOOPS}
 
     # ---- mutation ----------------------------------------------------------
     def reset(self, params=None, scope="path"):
@@ -83,6 +86,7 @@ class Workflow:
             self.state[k] = {"status": "pending", "detail": ""}
         self.scope = scope
         self.local = False
+        self.cmdb_miss = False
         self.path = {"nodes": [], "line": "", "reached": None}
         self.basics = []
         self.checks = []
@@ -230,6 +234,9 @@ class Workflow:
             missed = len(devices) - len(found)
             if not found:
                 self.set("cmdb", "failed", "no record in CMDB")
+                # no record -> no management address and no region, so no
+                # device command is possible; the run goes to the policy check
+                self.cmdb_miss = True
             elif missed:
                 self.set("cmdb", "done",
                          f"{len(found)} found, {missed} not in CMDB")

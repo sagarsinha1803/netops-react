@@ -53,11 +53,18 @@ SSH_SERVER = (_stdio(MCP_DIR, "troubleshoot_agent_mcp.py")
               if SSH_MCP_TRANSPORT == "stdio"
               else {"url": SSH_MCP_URL, "transport": "sse"})
 
+# Probing from the machine the agent runs on. OFF by default: a ping from here
+# answers "can this box reach it", which is a different question from "can the
+# source reach it" and reads like an answer to the second. When the CMDB has no
+# record for the source there is no device to SSH to, and the right move is the
+# firewall check -- Tufin needs only the two addresses -- not a probe from
+# somewhere else. Set LOCAL_PROBES=1 to offer the tools anyway.
+LOCAL_PROBES = os.environ.get("LOCAL_PROBES", "").lower() in ("1", "true", "yes")
+
 MCP_SERVERS = {
     "unicorn": _stdio(MCP_DIR, "unicorn_mcp.py"),          # get_device_details
     "tufin":   _stdio(MCP_DIR, "tufin_mcp.py"),            # get_firewall_path
     "ssh":     SSH_SERVER,                                 # execute_query_on_server
-    "local":   _stdio(MCP_DIR, "local_probe_mcp.py"),      # local_ping / local_traceroute
 }
 
 if USE_MOCKS:
@@ -65,8 +72,12 @@ if USE_MOCKS:
         "unicorn": _stdio(MOCK_DIR, "unicorn_mock.py"),
         "tufin":   _stdio(MOCK_DIR, "tufin_mock.py"),
         "ssh":     _stdio(MOCK_DIR, "device_mock.py"),
-        "local":   _stdio(MOCK_DIR, "local_probe_mock.py"),
     }
+
+if LOCAL_PROBES:
+    MCP_SERVERS["local"] = _stdio(
+        MOCK_DIR if USE_MOCKS else MCP_DIR,
+        "local_probe_mock.py" if USE_MOCKS else "local_probe_mcp.py")
 
 # Which SERVERS touch real devices. Every tool they expose -- including ones
 # added later -- is automatically read-only checked and human approved. Tools
