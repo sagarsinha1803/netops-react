@@ -57,8 +57,8 @@ CLIP = C.LLM_MODE == "clipboard"
 GREETING = (
     "**Network Operations troubleshooting agent**\n\n"
     "I check whether a destination is reachable from a source, show the path, "
-    "and point out where it breaks. Sources the CMDB does not know are probed "
-    "from this machine instead.\n\n"
+    "and point out where it breaks. A source the CMDB does not know cannot be "
+    "logged into, so those runs report the firewall verdict alone.\n\n"
     "Try: `troubleshoot 10.10.1.20 to 172.20.5.10` · "
     "`fetch device details for dc10-a1`"
 )
@@ -427,13 +427,6 @@ async def ws_endpoint(ws: WebSocket):
     finally:
         for t in tasks:
             t.cancel()
-
-
-# ------------------------------------------------------------- trace viewer --
-# A plain page for reading data/prompt_trace.jsonl at /trace -- registered
-# before the static mount, which otherwise swallows the path.
-from api import trace_view                              # noqa: E402
-trace_view.register(app)
 
 
 # ------------------------------------------------------------- static files --

@@ -29,6 +29,3 @@ venv/
 # frontend
 frontend/node_modules/
 frontend/dist/
-
-# local prompt traces: these hold UNMASKED prompts
-data/prompt_trace.jsonl

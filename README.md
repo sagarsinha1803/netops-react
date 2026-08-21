@@ -1,11 +1,10 @@
 # NetOps troubleshooting agent — React UI
 
 The same agent as `netops`, with the Chainlit UI replaced by **React + FastAPI
-over one WebSocket**, and one new capability: when the **source is not in the
-CMDB**, the agent probes with ping/traceroute **from the machine it runs on**
-instead of SSHing anywhere — and skips the Tufin lookup, since there is no
-topology to ask about. The report says plainly that reachability was tested
-from the agent host, not the real source.
+over one WebSocket**, and one behaviour of its own: when the **source is not in
+the CMDB** there is no device to log into, so the run skips ping and traceroute
+and reports the **firewall verdict alone**, saying plainly that nothing was
+tested from the source itself.
 
 The agent itself — the LangGraph graph, the guards, the three privacy layers,
 the clipboard relay — is unchanged from `netops`.
@@ -18,26 +17,26 @@ netops-react/
 ├── requirements.txt            backend deps (no chainlit)
 │
 ├── agent/                      the agent — same as netops, plus:
-│   ├── prompts.py              LOCAL FALLBACK routing when the CMDB misses
+│   ├── prompts.py              CMDB-miss routing: skip to the policy check
+│   ├── llm/masked_llm.py       masks prompts for an API model, not just the relay
 │   └── vendors.py              parses Windows ping/tracert output too
 │
 ├── mcp_tools/
 │   ├── unicorn_mcp.py          get_device_details        (CMDB)
 │   ├── tufin_mcp.py            get_firewall_path         (SecureTrack)
 │   ├── troubleshoot_agent_mcp.py  execute_query_on_server (SSH via bastion)
-│   └── local_probe_mcp.py      local_ping / local_traceroute  (NEW —
-│                               subprocess on the agent host; args are a
-│                               validated IP only, nothing to inject)
+│   └── local_probe_mcp.py      local_ping / local_traceroute — OFF unless
+│                               LOCAL_PROBES=1; args are a validated IP only
 │
 ├── api/
 │   ├── main.py                 FastAPI + the /ws WebSocket protocol
 │   └── workflow.py             panel state, ported from the Chainlit UI
 │
 ├── frontend/                   Vite + React (no UI framework)
-│   └── src/App.jsx · Console.jsx · styles.css
-│                               agent console, not a chat: command bar,
-│                               stage strip, compact activity feed (reasoning
-│                               and raw output behind toggles), verdict card.
+│   └── src/App.jsx · Console.jsx · ChatPanel.jsx · styles.css
+│                               agent console, not a chat: command bar, stage
+│                               strip, collapsible activity feed, tabbed report
+│                               (Report / Path / Deep), optional chat drawer.
 │                               Light/dark theme button, persisted.
 │
 └── tests/                      same suite as netops, plus test_local_probe.py
@@ -110,73 +109,6 @@ evidence about this host presented as evidence about the source. Set
 they take a validated IP argument only, the command line is assembled in code,
 and they stay approval-gated and audited as `agent host`.
 
-## Watching the prompts
-
-Local prompt tracing -- LangSmith without the cloud, nothing leaving the box:
-
-```powershell
-$env:TRACE="file"; $env:TRACE_MASKED="1"; .\run.ps1 -Mock   # data/prompt_trace.jsonl
-$env:TRACE="phoenix"; .\run.ps1 -Mock                       # + UI on localhost:6006
-```
-
-Each entry is one model call: the messages that went out, the reply, any tool
-calls, and how long it took. `TRACE_MASKED=1` records BOTH the real prompt and
-the masked one the endpoint actually received, side by side -- which is how you
-check the masking rather than trusting it.
-
-`TRACE=phoenix` adds a browsable UI -- spans, latencies, inputs and outputs per
-call. Start Phoenix FIRST, in its own terminal, and leave it running; the agent
-only sends traces to it:
-
-```powershell
-.venv\Scripts\phoenix.exe serve          # http://localhost:6006
-```
-
-Run it separately rather than in-process: launching it inside the agent takes
-long enough that Phoenix times out on itself, and it would die with the agent
-anyway. Kept apart, its history survives restarts. `PHOENIX_URL` points
-elsewhere if needed. If it is not running, the agent says so and carries on
-writing the file.
-
-It needs `uv pip install -r requirements-trace.txt` -- and watch the `openai`
-version afterwards: phoenix pulls a newer one than langchain-openai supports,
-and the only symptom is "Connection error" on every call.
-
-### Reading the trace
-
-Three ways, easiest first. None of them needs Phoenix:
-
-```powershell
-py tools\show_trace.py --masked      # the last run, in the terminal
-```
-
-or open **http://localhost:8000/trace** while the app is running -- the same
-thing as a page, turn by turn, with a toggle for the masked half. It refreshes
-every 5s, so you can leave it open beside the console.
-
-`TRACE=phoenix` is the third: a full observability product with projects,
-spans, latency percentiles and evaluators. Worth it when the question is "why
-was this slow" or "show me every run last week"; heavier than needed for
-"what did it send".
-
-### Why the traces show real addresses
-
-Both tracers sit INSIDE the masking boundary: they record what the agent is
-reasoning about, which is the real estate. Masking happens after that, in
-`MaskedChatModel`, on the way out to the endpoint. Seeing `10.10.1.20` in
-Phoenix is therefore expected and is NOT a sign that masking has failed.
-
-To see the other half, each traced call also emits a span named **"masked
-prompt (sent to endpoint)"** carrying exactly what left the machine. Open the
-two side by side and the question answers itself:
-
-    llm  MaskedChatModel                 ping 172.20.5.10 repeat 3
-    chain  masked prompt (sent to ...)   ping ip4.n2.h10 repeat 3
-
-**Both stores hold UNMASKED prompts** -- that is the point of them, and the
-reason `data/prompt_trace.jsonl` is gitignored. Phoenix keeps its own local
-database too: do not export it or hand it to anyone. Delete both when done.
-
 ## Safety — unchanged from netops
 
 Read-only allowlist in code, human approval on every device command, Tufin
@@ -205,8 +137,9 @@ $env:LLM_MODE="api"; $env:LLM_BASE_URL="http://127.0.0.1:11499/v1"; .\run.ps1 -M
 
 ## Copilot agent instructions
 
-The tool list grew (`local_ping`, `local_traceroute`), so if you use
-`CLIP_MODE=agent`, regenerate and re-paste the instructions:
+They are a COPY pasted into a custom Copilot agent and do not follow the code,
+so if you use `CLIP_MODE=agent`, regenerate and re-paste after any prompt or
+tool change:
 
 ```powershell
 $env:USE_MOCKS="1"; .venv\Scripts\python.exe -m agent.llm.clipboard_llm
