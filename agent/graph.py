@@ -39,7 +39,6 @@ from agent.utils import (commands_of, display_command,  # noqa: E402
                          tool_text)
 
 from agent import entities                  # noqa: E402
-from agent import tracing                   # noqa: E402
 from agent.llm import ip_mask                # noqa: E402
 
 try:
@@ -80,16 +79,6 @@ def build_llm():
 
 
 llm = build_llm()
-
-# TRACE=file|phoenix records every prompt and reply locally -- see agent/tracing.py.
-# Attached to the model itself, so it captures whichever backend is in use and
-# every call the graph makes, without threading a config through each node.
-# Set as a FIELD on the model, not with_config(): that returns a
-# RunnableBinding, and the later bind_tools() call reaches through it to the
-# model underneath -- dropping the config, exactly as it drops bound kwargs.
-_TRACERS = tracing.callbacks()
-if _TRACERS:
-    llm.callbacks = _TRACERS
 SYSTEM_PROMPT = prompts.system_prompt(C.LLM_MODE)
 
 

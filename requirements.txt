@@ -19,7 +19,7 @@ urllib3==2.7.0
 # paramiko is NOT here: only the host that actually runs
 # troubleshoot_agent_mcp.py needs it. See requirements-device.txt.
 
-# langchain-openai 1.4.0 needs openai<3. Installing anything that pulls a
-# newer one (arize-phoenix did) breaks every API call with an AssertionError
-# inside httpx, reported only as "Connection error".
+# langchain-openai 1.4.0 needs openai<3. Anything that drags in a newer one
+# breaks every API call with an AssertionError inside httpx, surfaced only as
+# "Connection error" -- so pin it rather than discover that again.
 openai>=2.45,<3
