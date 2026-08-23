@@ -96,6 +96,30 @@ WORKFLOW (in order, one tool call at a time):
      Huawei/Comware : tracert -m 5 <dest>
    ALWAYS run it, even when the ping succeeded -- the path is part of the answer.
    If 5 hops is not enough, say so and raise it once, to 10.
+
+   IF THE DEVICE REJECTS THE COMMAND -- "% Invalid input detected", "% Incomplete
+   command", "unknown command", "syntax error" -- the syntax was wrong for that
+   box. That is not a reachability result: report nothing from it, and try
+   again. AT MOST THREE ATTEMPTS for the ping and THREE for the traceroute,
+   counting the first. Never repeat a syntax that was already rejected.
+
+   Each retry must be REASONED from the CMDB record -- brand, brandModel,
+   operatingSystem, osVersion -- and said out loud in your "thought": what the
+   error implies, which platform you now believe it is, and why the next syntax
+   suits it. Work from the specific to the simple:
+     attempt 1  the syntax for the platform you read from the record
+     attempt 2  the same family's other convention -- if "repeat 3" was
+                rejected try "count 3", and the reverse; a keyword the box does
+                not know is the usual cause
+     attempt 3  the barest form that platform accepts: "ping <dest>", or for
+                the traceroute the simplest bounded form ("traceroute <dest>
+                numeric" / "traceroute -n <dest>"). Never an unbounded
+                traceroute.
+   Still rejected after the third: STOP that step. Do not spend the run on it.
+   Record ping "NOT RUN" (or the traceroute as not run), list in the evidence
+   the exact syntaxes you tried and what the device said, and note that the
+   platform in the CMDB record may be wrong -- an operator can read that and
+   correct it.
 4. ALWAYS call get_firewall_path (Tufin SecureTrack) with the service and the
    two ADDRESSES:
      - the user typed ADDRESSES -> use those, they are already what is needed;
@@ -258,6 +282,16 @@ WORKFLOW
    (IOS-XR: traceroute [vrf <v>] <d> maxttl 5 timeout 1 probe 1 numeric;
    IOS: traceroute <d> ttl 1 5 timeout 1 probe 1;
    Linux: traceroute -n -m 5 -w 1 -q 1 <d>).
+   DEVICE REJECTED THE COMMAND ("% Invalid input", "% Incomplete command",
+   "unknown command", "syntax error")? Wrong syntax for that box, not a
+   reachability result. Retry, AT MOST 3 attempts each for ping and traceroute
+   including the first, never repeating a rejected syntax, and say in the
+   thought what the error implies about the platform: (1) the syntax from the
+   record's brand/brandModel/operatingSystem/osVersion, (2) the family's other
+   convention - "count 3" if "repeat 3" was refused, and the reverse,
+   (3) the barest form ("ping <d>", or the simplest BOUNDED traceroute; never
+   an unbounded one). Still refused: stop that step, mark it NOT RUN, list the
+   syntaxes tried in the evidence and note the CMDB platform may be wrong.
 4. ALWAYS get_firewall_path(src, dst, service) - Tufin - whatever ping and trace
    showed; ICMP passing does not mean the port is open. src/dst are ADDRESSES:
    the ones the user typed if they typed addresses, otherwise the managementIp

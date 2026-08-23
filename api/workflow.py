@@ -334,6 +334,26 @@ def as_report(text: str):
     return {"text": body}
 
 
+# A command can fail two different ways, and both must read as failure: the
+# probe ran and reported no reachability, OR the device rejected the syntax.
+# The second was missing, so a command the device never even accepted showed a
+# green tick with the error text as its "result".
+_REJECTED_SYNTAX = (
+    r"% invalid input"
+    r"|invalid input detected"
+    r"|% incomplete command"
+    r"|% ambiguous command"
+    r"|% unknown command"
+    r"|unknown command"
+    r"|% type \"help\""
+    r"|syntax error"
+    r"|invalid command"
+    r"|command not found"
+    r"|% bad "
+    r"|unrecognized command"
+    r"|error: unknown"
+)
+
 _FAILED_OUTPUT = re.compile(
     r"^\s*(REJECTED|\[error|error:)"
     r"|unknown tool"
@@ -341,8 +361,21 @@ _FAILED_OUTPUT = re.compile(
     r"|100% packet loss"
     r"|request timed out"
     r"|destination (host|net) unreachable"
-    r"|% (network|destination) .*(not|unreachable)",
+    r"|% (network|destination) .*(not|unreachable)"
+    r"|" + _REJECTED_SYNTAX,
     re.I)
+
+_SYNTAX_RE = re.compile(_REJECTED_SYNTAX, re.I)
+
+
+def rejected_syntax(body) -> bool:
+    """True when the DEVICE refused the command, rather than answering it.
+
+    Worth separating from a failed probe: a rejected command says nothing about
+    reachability, and the right response is a different syntax for that
+    platform, not a conclusion.
+    """
+    return bool(_SYNTAX_RE.search(str(body or "")))
 
 
 def check_ok(body: str) -> bool:

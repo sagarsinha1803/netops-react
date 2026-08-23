@@ -100,8 +100,12 @@ POLICY_TOOL_NAMES = {"get_firewall_path"}
 # ---- behaviour ---------------------------------------------------------------
 REQUIRE_APPROVAL = True
 
-MAX_TOOL_LOOPS = 12       # agent<->tools round trips before we force an answer
-                          # (2 CMDB + ping + traceroute + Tufin + escalation)
+MAX_TOOL_LOOPS = 16       # agent<->tools round trips before we force an answer.
+                          # 2 CMDB + ping + traceroute + Tufin is 5; the budget
+                          # leaves room for the syntax retries the prompt allows
+                          # (up to 3 attempts each for ping and traceroute, on a
+                          # platform whose CLI the model guessed wrong) without
+                          # the run being cut off mid-ladder.
 DEEP_MAX_LOOPS = 10       # budget for a deeper-checks turn: the model reasons
                           # its way through the escalation one check at a time,
                           # so it needs its own allowance. Per turn, via state.
