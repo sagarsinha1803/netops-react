@@ -333,11 +333,53 @@ def policy_verdict(body: str):
         except Exception:
             continue
     if data:
-        verdict = str(data.get("verdict") or "UNKNOWN").upper()
+        verdict = str(data.get("verdict") or "").upper()
         rules = data.get("blocking_rules") or []
         acl = str(rules[0].get("acl") or "") if rules else ""
-        return verdict, acl
+        if verdict:
+            return verdict, acl
+
+        # No "verdict" key: this is SecureTrack's own payload rather than the
+        # summary. The tool may be returning it raw -- read the same facts out
+        # of the shape the API actually uses, so the panel and the report work
+        # either way instead of reporting UNKNOWN for a perfectly good answer.
+        results = data.get("path_calc_results") or data
+        allowed = results.get("traffic_allowed")
+        if allowed is not None:
+            verdict = "ALLOWED" if allowed else "BLOCKED"
+            return verdict, acl or _first_denying_rule(results)
+
     verdict = next((v for v in ("BLOCKED", "ALLOWED") if v in text.upper()),
                    "UNKNOWN")
     m = re.search(r"['\"]acl['\"]\s*:\s*['\"]([^'\"]+)['\"]", text)
     return verdict, (m.group(1) if m else "")
+
+
+_DENY = ("deny", "drop", "reject")
+
+
+def _first_denying_rule(node, depth: int = 0) -> str:
+    """The name of the first deny rule anywhere in a raw SecureTrack payload.
+
+    Vendors label rules differently -- aclName on a Cisco ACL entry,
+    name/ruleIdentifier on a Fortinet policy -- so this takes whichever is
+    present rather than insisting on one.
+    """
+    if depth > 8:
+        return ""
+    if isinstance(node, dict):
+        action = str(node.get("action") or "").lower()
+        if action in _DENY:
+            for key in ("aclName", "name", "ruleIdentifier", "ruleNumber"):
+                if node.get(key):
+                    return str(node[key])
+        for value in node.values():
+            found = _first_denying_rule(value, depth + 1)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for item in node[:50]:
+            found = _first_denying_rule(item, depth + 1)
+            if found:
+                return found
+    return ""

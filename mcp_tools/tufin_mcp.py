@@ -76,10 +76,20 @@ class Settings:
 # rather than hard-coding a path into the document these walk it and recognise
 # objects by the keys they carry. A dict with "action" and "aclName" is a rule;
 # one with "incomingInterfaces" or "nextDevices" is a device on the path.
+# A rule is recognised by carrying an action plus SOMETHING that identifies it.
+# Which of these SecureTrack uses varies by version and by device vendor: a
+# Cisco ACL entry comes back with aclName/ruleNumber, while a Fortinet policy
+# comes back with ruleIdentifier/ruleUid and a human name ("Deny-Example-Rule").
+# Matching only the first pair meant a real deny rule was not recognised at all,
+# so the summary reported BLOCKED with an empty blocking_rules list and the
+# report could not name what dropped the traffic.
+_RULE_IDS = ("aclName", "ruleNumber", "ruleIdentifier", "ruleUid", "name")
+
+
 def _walk(node, found_rules, found_devices):
     if isinstance(node, dict):
         keys = set(node)
-        if "action" in keys and ("aclName" in keys or "ruleNumber" in keys):
+        if "action" in keys and any(k in keys for k in _RULE_IDS):
             found_rules.append(node)
         elif "incomingInterfaces" in keys or "nextDevices" in keys:
             found_devices.append(node)
@@ -99,7 +109,11 @@ def _as_list(value):
 def _slim_rule(rule: dict) -> dict:
     return {
         "action": rule.get("action"),
-        "acl": rule.get("aclName") or rule.get("name") or "",
+        # whichever of the identifiers this vendor filled in; the human name is
+        # the one worth quoting in a report ("Deny-Example-Rule")
+        "acl": (rule.get("aclName") or rule.get("name")
+                or rule.get("ruleIdentifier") or ""),
+        "rule_id": rule.get("ruleIdentifier") or rule.get("ruleNumber") or "",
         "sources": _as_list(rule.get("sources"))[:4],
         "destinations": _as_list(rule.get("destinations"))[:4],
         "services": _as_list(rule.get("services"))[:4],
@@ -151,7 +165,9 @@ def summarise(payload: dict) -> dict:
     allowed = results.get("traffic_allowed")
 
     unrouted = []
-    for item in _as_list(payload.get("unrouted_elements")):
+    # top level in some versions, inside path_calc_results in others
+    for item in (_as_list(payload.get("unrouted_elements"))
+                 or _as_list(results.get("unrouted_elements"))):
         unrouted.append({"destination": item.get("destination"),
                          "source": _as_list(item.get("source"))[:4]})
 
