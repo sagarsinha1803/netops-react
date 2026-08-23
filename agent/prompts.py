@@ -97,11 +97,24 @@ WORKFLOW (in order, one tool call at a time):
    ALWAYS run it, even when the ping succeeded -- the path is part of the answer.
    If 5 hops is not enough, say so and raise it once, to 10.
 
-   IF THE DEVICE REJECTS THE COMMAND -- "% Invalid input detected", "% Incomplete
-   command", "unknown command", "syntax error" -- the syntax was wrong for that
-   box. That is not a reachability result: report nothing from it, and try
-   again. AT MOST THREE ATTEMPTS for the ping and THREE for the traceroute,
-   counting the first. Never repeat a syntax that was already rejected.
+   JUDGE EVERY OUTPUT BEFORE YOU USE IT. After each command, say in your
+   "thought" whether what came back actually ANSWERS it. An output is NOT a
+   usable answer when it is:
+     - a refusal: "% Invalid input detected", "% Incomplete command",
+       "% Ambiguous command", "unknown command", "syntax error";
+     - empty, or only the echoed prompt and command with nothing after it;
+     - a permission or authentication error ("% Permission denied", "not
+       authorized", "login failed");
+     - the wrong kind of output for what you ran -- a ping that returns no
+       success rate and no packet counts, a traceroute with no numbered hops;
+     - cut off mid-way, or a paging prompt ("--More--") instead of a result.
+   None of those say anything about reachability. Do NOT report a verdict from
+   them, and do not treat "no output" as "no reply from the destination" --
+   those are different facts.
+
+   When the output is not usable, TRY AGAIN. AT MOST THREE ATTEMPTS for the
+   ping and THREE for the traceroute, counting the first. Never repeat a
+   command that already failed.
 
    Each retry must be REASONED from the CMDB record -- brand, brandModel,
    operatingSystem, osVersion -- and said out loud in your "thought": what the
@@ -115,11 +128,14 @@ WORKFLOW (in order, one tool call at a time):
                 the traceroute the simplest bounded form ("traceroute <dest>
                 numeric" / "traceroute -n <dest>"). Never an unbounded
                 traceroute.
-   Still rejected after the third: STOP that step. Do not spend the run on it.
-   Record ping "NOT RUN" (or the traceroute as not run), list in the evidence
-   the exact syntaxes you tried and what the device said, and note that the
-   platform in the CMDB record may be wrong -- an operator can read that and
-   correct it.
+   Still nothing usable after the third: STOP that step -- do not spend the run
+   on it. Mark it FAILED, not "not run": it was attempted and produced nothing
+   to stand on. Record ping "FAILED" with the reason (or the traceroute as
+   failed), list in the evidence the exact commands you tried and what the
+   device said to each, and note that the platform in the CMDB record may be
+   wrong -- an operator can read that and correct it. The overall result is
+   then INCONCLUSIVE unless Tufin settles it: a command that never ran is not
+   evidence that the destination is unreachable.
 4. ALWAYS call get_firewall_path (Tufin SecureTrack) with the service and the
    two ADDRESSES:
      - the user typed ADDRESSES -> use those, they are already what is needed;
@@ -282,16 +298,23 @@ WORKFLOW
    (IOS-XR: traceroute [vrf <v>] <d> maxttl 5 timeout 1 probe 1 numeric;
    IOS: traceroute <d> ttl 1 5 timeout 1 probe 1;
    Linux: traceroute -n -m 5 -w 1 -q 1 <d>).
-   DEVICE REJECTED THE COMMAND ("% Invalid input", "% Incomplete command",
-   "unknown command", "syntax error")? Wrong syntax for that box, not a
-   reachability result. Retry, AT MOST 3 attempts each for ping and traceroute
-   including the first, never repeating a rejected syntax, and say in the
-   thought what the error implies about the platform: (1) the syntax from the
-   record's brand/brandModel/operatingSystem/osVersion, (2) the family's other
-   convention - "count 3" if "repeat 3" was refused, and the reverse,
-   (3) the barest form ("ping <d>", or the simplest BOUNDED traceroute; never
-   an unbounded one). Still refused: stop that step, mark it NOT RUN, list the
-   syntaxes tried in the evidence and note the CMDB platform may be wrong.
+   JUDGE EVERY OUTPUT: say in the thought whether it actually answers the
+   command. NOT usable = a refusal ("% Invalid input", "% Incomplete command",
+   "unknown command", "syntax error"), empty or only the echoed prompt, a
+   permission error, no success rate / packet counts from a ping, no numbered
+   hops from a traceroute, or a "--More--" paging prompt. None of those are
+   reachability results, and "no output" is NOT "no reply from the
+   destination".
+   Not usable -> retry, AT MOST 3 attempts each for ping and traceroute
+   including the first, never repeating a failed command, saying what the
+   output implies about the platform: (1) the syntax from the record's
+   brand/brandModel/operatingSystem/osVersion, (2) the family's other
+   convention - "count 3" if "repeat 3" failed, and the reverse, (3) the barest
+   form ("ping <d>", or the simplest BOUNDED traceroute; never an unbounded
+   one). Still nothing usable after 3: stop that step and mark it FAILED (not
+   "not run"), list the commands tried and what came back, note the CMDB
+   platform may be wrong, and keep the overall result INCONCLUSIVE unless Tufin
+   settles it.
 4. ALWAYS get_firewall_path(src, dst, service) - Tufin - whatever ping and trace
    showed; ICMP passing does not mean the port is open. src/dst are ADDRESSES:
    the ones the user typed if they typed addresses, otherwise the managementIp

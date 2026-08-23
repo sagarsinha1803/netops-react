@@ -64,6 +64,58 @@ for label, body in OK.items():
     check(f"success: {label} -> ok", check_ok(body), body[:40])
     check(f"success: {label} -> not a rejection", not rejected_syntax(body))
 
+# ---- output that is silence, not a result ----------------------------------
+from api.workflow import usable_output                            # noqa: E402
+
+CMD = "ping 198.51.100.10 repeat 3"
+check("an empty reply is not usable", not usable_output("", CMD))
+check("only the echoed prompt and command is not usable",
+      not usable_output(f"SW-EXAMPLE-01#{CMD}\nSW-EXAMPLE-01#", CMD))
+check("a permission error is not usable",
+      not usable_output("% Permission denied", CMD))
+check("an authentication failure is not usable",
+      not usable_output("login failed for user svc-account", CMD))
+check("a pager prompt is not usable", not usable_output("--More--", CMD))
+check("a refusal is not usable",
+      not usable_output("% Invalid input detected at '^' marker.", CMD))
+check("a real ping result IS usable",
+      usable_output(f"{CMD}\nSuccess rate is 100 percent (3/3)", CMD))
+check("a FAILED ping is still usable -- it answered the question",
+      usable_output(f"{CMD}\nSuccess rate is 0 percent (0/3)", CMD),
+      "a failed probe is a result; silence is not")
+
+# ---- a stage attempted three times and never answered must end failed ------
+from api.workflow import Workflow                                 # noqa: E402
+
+wf = Workflow()
+wf.reset({"source": "SW-EXAMPLE-01", "dest": "198.51.100.10"})
+for attempt in ("ping 198.51.100.10 repeat 3", "ping 198.51.100.10 count 3",
+                "ping 198.51.100.10"):
+    idx = wf.add_basic(attempt, kind="ping")
+    wf.finish_basic(idx, False, "% Invalid input detected")
+
+tried = [b for b in wf.basics if b.get("kind") == "ping"]
+check("three attempts were recorded", len(tried) == 3, str(len(tried)))
+check("and every one is marked failed",
+      all(b["status"] == "failed" for b in tried))
+
+# what api/main.py does at the end of a run
+if wf.state["ping"]["status"] in ("pending", "running"):
+    bad = sum(1 for b in tried if b.get("status") == "failed")
+    wf.set("ping", "failed",
+           f"{len(tried)} attempt(s), none returned a usable result"
+           if bad == len(tried) else f"{len(tried)} attempt(s), no result")
+check("the stage ends as a CROSS, not grey 'skipped'",
+      wf.state["ping"]["status"] == "failed", str(wf.state["ping"]))
+check("and says how many attempts were made",
+      "3 attempt(s)" in wf.state["ping"]["detail"], wf.state["ping"]["detail"])
+
+# a stage never attempted at all stays grey -- that is a different fact
+wf2 = Workflow()
+wf2.reset({"source": "a", "dest": "b"})
+never = [b for b in wf2.basics if b.get("kind") == "trace"]
+check("a stage never attempted is not called failed", not never)
+
 # ---- the row's one-line detail should quote the refusal --------------------
 line = failed_line(REJECTED["IOS invalid input"])
 check("the panel shows the device's own words for the refusal",

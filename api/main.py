@@ -50,7 +50,7 @@ from agent.utils import display_command           # noqa: E402
 
 from api.workflow import (Workflow, as_report, check_ok,      # noqa: E402
                           cmdb_record, device_label, failed_line,
-                          parse_request, policy_verdict)
+                          parse_request, policy_verdict, usable_output)
 
 CLIP = C.LLM_MODE == "clipboard"
 
@@ -187,7 +187,11 @@ async def drive(sess: Session, app_graph, config, first_input,
                     echo = display_command(name, args)
                     useful = [ln for ln in lines if echo not in ln]
                     detail = failed_line(body) or (useful or lines or [""])[0]
-                    ok = check_ok(body)
+                    # a command is "ok" only if it both ANSWERED and succeeded:
+                    # a refusal, a permission error or silence is not a result
+                    ok = check_ok(body) and usable_output(body, echo)
+                    if not detail and not usable_output(body, echo):
+                        detail = "no output"
                     if tid in check_idx:
                         wf.finish_check(check_idx[tid], ok, detail[:70],
                                         output=body)
@@ -340,7 +344,20 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         stages = (("cmdb",) if wf.scope == "lookup"
                   else ("cmdb", "ping", "trace", "policy"))
         for key in stages:
-            if wf.state[key]["status"] in ("pending", "running"):
+            if wf.state[key]["status"] not in ("pending", "running"):
+                continue
+            # A stage that was ATTEMPTED but never produced a usable result is
+            # a failure, not something skipped: the model tried its ladder of
+            # syntaxes and none of them answered. Grey would read as "we did not
+            # get to this", which hides the very thing an operator needs to see.
+            tried = [b for b in wf.basics if b.get("kind") == key]
+            if tried:
+                bad = sum(1 for b in tried if b.get("status") == "failed")
+                wf.set(key, "failed",
+                       f"{len(tried)} attempt(s), none returned a usable result"
+                       if bad == len(tried) else
+                       f"{len(tried)} attempt(s), no result to report")
+            else:
                 wf.set(key, "skipped", wf.state[key]["detail"] or why)
         wf.set("done", "done",
                "lookup complete" if wf.scope == "lookup" else "report ready")

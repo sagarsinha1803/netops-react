@@ -367,6 +367,39 @@ _FAILED_OUTPUT = re.compile(
 
 _SYNTAX_RE = re.compile(_REJECTED_SYNTAX, re.I)
 
+# Output that cannot be a reachability result for other reasons: the box would
+# not let us in, or it answered with a pager instead of a result.
+_UNUSABLE = re.compile(
+    _REJECTED_SYNTAX
+    + r"|% permission denied|permission denied|not authorized|authorization failed"
+    + r"|login failed|authentication failed|--more--",
+    re.I)
+
+
+# a line that is only a device prompt: no spaces, ending in # > or $
+_BARE_PROMPT = re.compile(r"^\S*[#>$]\s*$")
+
+
+def usable_output(body, command: str = "") -> bool:
+    """Did this output answer the command at all?
+
+    Separate from "did the probe succeed". A refusal, a permission error, a
+    pager prompt, or nothing but the echoed command are all silence -- and
+    silence is not evidence that the destination is unreachable.
+    """
+    text = str(body or "")
+    if _UNUSABLE.search(text):
+        return False
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if command:
+        # drop the device's echo of the command itself
+        lines = [ln for ln in lines if command.strip() not in ln]
+    # and the bare prompt it prints afterwards -- "SW-01#", "user@host:~$",
+    # "RP/0/RSP0/CPU0:CORE-01#". Left in, a session that answered nothing at
+    # all still looked like it had said something.
+    lines = [ln for ln in lines if not _BARE_PROMPT.match(ln)]
+    return bool(lines)
+
 
 def rejected_syntax(body) -> bool:
     """True when the DEVICE refused the command, rather than answering it.
