@@ -118,8 +118,13 @@ IP/name masking for the clipboard relay.
 ## Tests
 
 ```powershell
-.venv\Scripts\python.exe tests\test_local_probe.py    # NEW: windows parsing + gating
+.venv\Scripts\python.exe tests\test_guards.py         # read-only enforcement
 .venv\Scripts\python.exe tests\test_flow.py           # whole graph (set USE_MOCKS=1)
+.venv\Scripts\python.exe tests\test_command_status.py # refusal vs result vs silence
+.venv\Scripts\python.exe tests\test_tufin_shape.py    # SecureTrack reply shapes
+.venv\Scripts\python.exe tests\test_cmdb_record.py    # found vs not-found
+.venv\Scripts\python.exe tests\test_api_mask.py       # masking through an API model
+.venv\Scripts\python.exe tests\test_local_probe.py    # the optional local probes
 .venv\Scripts\python.exe tests\test_ip_mask.py
 .venv\Scripts\python.exe tests\test_entities.py
 .venv\Scripts\python.exe tests\test_redact.py
