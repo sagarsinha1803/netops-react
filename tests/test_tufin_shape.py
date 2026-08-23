@@ -78,6 +78,48 @@ check("unrouted_elements nested under path_calc_results are found",
 check("no 'rule not identified' note now that the rule IS identified",
       "note" not in out, str(out.get("note"))[:60])
 
+# ---- the shape of the path -------------------------------------------------
+# device_path is flat, so two routers that are ALTERNATIVES for the same step
+# read as two consecutive hops -- which is how a report came to draw traffic
+# transiting both, and then to append a destination that was never reached.
+BRANCHED = {"path_calc_results": {"traffic_allowed": False, "device_info": [
+    {"name": "R-EDGE", "incomingInterfaces": [], "nextDevices": [
+        {"name": "R-A", "routes": []}, {"name": "R-B", "routes": []}]},
+    {"name": "R-A", "incomingInterfaces": [], "nextDevices": [
+        {"name": "FW", "routes": []}]},
+    {"name": "R-B", "incomingInterfaces": [], "nextDevices": [
+        {"name": "FW", "routes": []}]},
+    {"name": "FW", "incomingInterfaces": [], "nextDevices": [
+        {"name": "R-LAN1", "routes": []}, {"name": "R-LAN2", "routes": []}],
+     "rules": [{"action": "Deny", "name": "Deny-Example-Rule"}]},
+    {"name": "R-LAN1", "incomingInterfaces": [], "nextDevices": []},
+    {"name": "R-LAN2", "incomingInterfaces": [], "nextDevices": []}],
+    "unrouted_elements": [{"destination": "192.0.2.9", "source": ["198.51.100.5"]}]}}
+
+b = summarise(BRANCHED)
+check("hops group alternatives instead of sequencing them",
+      b["hops"] == [["R-EDGE"], ["R-A", "R-B"], ["FW"], ["R-LAN1", "R-LAN2"]],
+      str(b["hops"]))
+check("unrouted pair means the destination is NOT reached",
+      b["reaches_destination"] is False, str(b["reaches_destination"]))
+check("and the model is told not to append the destination",
+      "must END where it stops" in b.get("path_note", ""), b.get("path_note", "")[:60])
+
+REACHED = {"path_calc_results": {"traffic_allowed": True, "device_info": [
+    {"name": "R-EDGE", "incomingInterfaces": [], "nextDevices": [
+        {"name": "R-CORE", "routes": []}]},
+    {"name": "R-CORE", "incomingInterfaces": [], "nextDevices": [
+        {"name": "R-FAR", "routes": []}]}]}}
+r = summarise(REACHED)
+check("a path that continues past what was modelled is not called unreachable",
+      r["reaches_destination"] is None, str(r["reaches_destination"]))
+check("only unrouted_elements is treated as conclusive -- a tail with no next "
+      "hop is NOT, since a directly attached destination looks the same",
+      summarise({"path_calc_results": {"traffic_allowed": True, "device_info": [
+          {"name": "R-ONLY", "incomingInterfaces": [], "nextDevices": []}]}})
+      ["reaches_destination"] is None)
+check("no path_note when there is nothing to warn about", "path_note" not in r)
+
 # a Cisco-style rule must keep working
 CISCO = {"path_calc_results": {"traffic_allowed": False, "device_info": [
     {"name": "RTR-A", "incomingInterfaces": [],

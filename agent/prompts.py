@@ -104,8 +104,13 @@ WORKFLOW (in order, one tool call at a time):
      service: "tcp:<port>" / "udp:<port>" when the user named a protocol and
      port, otherwise "any".
    Read the result: "verdict" is ALLOWED, BLOCKED or UNKNOWN;
-   "blocking_rules" carries the action, the ACL name and what it is enforced
-   on; "device_path" is the firewall/router chain SecureTrack modelled;
+   "blocking_rules" carries the action, the rule/ACL name and what it is
+   enforced on; "hops" is the path as STEPS, and a step listing more than one
+   device means those are ALTERNATIVES at that point, not devices the traffic
+   crosses in turn -- write them as one hop ("A / B"), never as two;
+   "device_path" is the same devices flat, for when hops is absent;
+   "reaches_destination": false means the traffic never arrives, so the path
+   must END where it stops with "X" and the destination must NOT be appended;
    "unrouted_elements" means the topology has no route at all for that pair.
    A BLOCKED verdict with a named ACL IS the answer -- quote the ACL in the
    evidence and the cause rather than probing further.
@@ -246,8 +251,12 @@ WORKFLOW
 4. ALWAYS get_firewall_path(src, dst, service) - Tufin - whatever ping and trace
    showed; ICMP passing does not mean the port is open. service =
    "tcp:<port>"/"udp:<port>" if named, else "any". Read "verdict"
-   (ALLOWED|BLOCKED|UNKNOWN), "blocking_rules" (action + ACL), "device_path",
-   "unrouted_elements". BLOCKED with a named ACL IS the answer: quote it.
+   (ALLOWED|BLOCKED|UNKNOWN), "blocking_rules" (action + rule name),
+   "unrouted_elements", and:
+     "hops" - a step with two devices means ALTERNATIVES, one hop "A / B";
+     "reaches_destination": false -> path ENDS at the last hop with "X", do
+     NOT append the destination.
+   BLOCKED with a named rule IS the answer: quote it.
 5. STOP and answer. The workflow ENDS at Tufin - run NO show command here,
    whatever the result. If unconfirmed, say what you would check next; the user
    decides whether to run it.

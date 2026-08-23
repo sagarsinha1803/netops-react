@@ -147,6 +147,52 @@ def _slim_device(dev: dict) -> dict:
     }
 
 
+def _hops(devices) -> list:
+    """The device chain as STEPS, with parallel alternatives grouped.
+
+    SecureTrack returns a graph: a router can have two next devices that are
+    equal-cost alternatives, and both then lead to the same firewall. Listing
+    the names flat makes those look sequential. This walks the graph from
+    whichever device nothing else points at, one step at a time.
+    """
+    by_name, nexts = {}, {}
+    for dev in devices:
+        name = str(dev.get("name") or "")
+        if not name:
+            continue
+        by_name[name] = dev
+        nexts[name] = [str(n.get("name")) for n in _as_list(dev.get("nextDevices"))
+                       if n.get("name")]
+
+    pointed_at = {n for targets in nexts.values() for n in targets}
+    start = [n for n in by_name if n not in pointed_at] or list(by_name)[:1]
+
+    hops, current, seen = [], start, set()
+    while current:
+        step = [n for n in dict.fromkeys(current) if n not in seen]
+        if not step:
+            break
+        hops.append(step)
+        seen.update(step)
+        current = [t for n in step for t in nexts.get(n, [])]
+    return hops
+
+
+def _reaches_destination(payload, results, devices):
+    """False when SecureTrack says the pair is unrouted. None otherwise.
+
+    Only unrouted_elements is conclusive. It is tempting to also read "the last
+    device has no next hop" as non-delivery, but SecureTrack stops modelling at
+    the last device it knows about -- a destination sitting directly on that
+    device's segment looks identical. Guessing there would turn a delivered
+    path into a reported failure, so this reports what it knows and leaves the
+    rest unstated.
+    """
+    unrouted = (_as_list(payload.get("unrouted_elements"))
+                or _as_list(results.get("unrouted_elements")))
+    return False if unrouted else None
+
+
 def summarise(payload: dict) -> dict:
     """Turn a full path response into the handful of facts the agent needs.
 
@@ -179,6 +225,9 @@ def summarise(payload: dict) -> dict:
             seen.add(name)
             chain.append(str(name))
 
+    hops = _hops(devices)
+    reaches = _reaches_destination(payload, results, devices)
+
     out = {
         "traffic_allowed": allowed,
         "verdict": ("ALLOWED" if allowed is True
@@ -186,9 +235,22 @@ def summarise(payload: dict) -> dict:
         "blocking_rules": blocking[:5],
         "rules_seen": len(rules),
         "device_path": chain[:20],
+        # device_path is FLAT, and a topology is not: two routers that are
+        # alternatives for the same step read as two consecutive hops, which
+        # is how a report came to claim traffic transited both. hops keeps the
+        # shape -- one entry per step, each listing the devices that are
+        # alternatives at that step.
+        "hops": hops[:20],
         "device_count": len(chain),
+        "reaches_destination": reaches,
         "unrouted_elements": unrouted[:5],
     }
+    if reaches is False:
+        out["path_note"] = (
+            "The modelled path does NOT reach the destination: the last "
+            "devices have no next hop, or SecureTrack listed the pair in "
+            "unrouted_elements. The path in the report must END where it "
+            "stops, marked X -- do not append the destination to it.")
 
     if allowed is False and not blocking:
         out["note"] = (
