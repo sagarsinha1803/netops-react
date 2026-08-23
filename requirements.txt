@@ -16,6 +16,12 @@ python-dotenv==1.2.2
 pyperclip==1.11.0
 urllib3==2.7.0
 
+# Archangel alerts (mcp_tools/alert_mcp.py). psycopg2-binary is the PostgreSQL
+# driver the ARCHANGEL_DB_URL names; swap it for the driver your database
+# actually uses. Neither is needed to run with USE_MOCKS=1.
+SQLAlchemy==2.0.52
+psycopg2-binary==2.9.12
+
 # paramiko is NOT here: only the host that actually runs
 # troubleshoot_agent_mcp.py needs it. See requirements-device.txt.
 

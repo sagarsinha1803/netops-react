@@ -501,6 +501,7 @@ INSTRUCTION_LIMIT = 7000
 # and are included only when they were actually loaded, so their absence is
 # not reported as something missing.
 AGENT_TOOLS = ("get_device_details", "get_firewall_path",
+               "get_alert_and_ticket_details_from_archangel",
                "execute_query_on_server")
 
 if __name__ == "__main__":

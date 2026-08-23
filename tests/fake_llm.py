@@ -46,6 +46,10 @@ SCRIPT = [
     _ssh("traceroute 172.20.5.10 maxttl 5 timeout 1 probe 1 numeric"),
     ("get_firewall_path", {"src": "10.10.1.20", "dst": "172.20.5.10",
                            "service": "tcp:443"}),
+    ("get_alert_and_ticket_details_from_archangel",
+     {"device_name": "APP-SRV-DC1-020"}),
+    ("get_alert_and_ticket_details_from_archangel",
+     {"device_name": "PAY-API-DC2-010"}),
     _ssh("show route 172.20.5.10"),
     _ssh("show access-lists EDGE-OUT | include 172.20.5.10"),
 ]
@@ -60,6 +64,8 @@ LOCAL_SCRIPT = [
                            "service": "any"}),
 ]
 
+# no alert lookup here on purpose: with no CMDB record there is no device name
+# for Archangel to be keyed by
 LOCAL_THOUGHTS = [
     "Looking up the source in the CMDB.",
     "Source is not in the CMDB. Checking the destination too.",
@@ -113,8 +119,10 @@ THOUGHTS = [
     "Ping failed. Running a bounded traceroute to find where it dies.",
     "Trace stops at the edge firewall. Asking Tufin whether policy permits "
     "tcp:443 end to end.",
-    "Tufin says blocked by DENY-ALL. Confirming the route exists so I can rule "
-    "out a routing fault.",
+    "Tufin says blocked by DENY-ALL. Checking Archangel for open alerts on the "
+    "source before I conclude.",
+    "And the destination's open alerts.",
+    "Confirming the route exists so I can rule out a routing fault.",
     "Route is valid, so the drop is policy. Reading the ACL for the detail.",
 ]
 

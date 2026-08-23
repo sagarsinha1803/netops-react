@@ -17,14 +17,15 @@ are the map.
  │           │         │              ▼               │  stdio │  tufin     │  firewall
  └───────────┘         │  Session      api/main.py    │───────▶│  MCP       │  policy
                        │    drive() walks the graph   │        ├────────────┤
-                       │    Workflow   api/workflow.py│   SSE  │  ssh MCP   │  devices
-                       │            │                 │───────▶│ via bastion│
+                       │    Workflow   api/workflow.py│  stdio │ archangel  │  alerts +
+                       │            │                 │───────▶│  MCP       │  tickets
                        │            ▼                 │        ├────────────┤
-                       │  LangGraph agent    agent/   │  stdio │ local probe│  off by
-                       │    ├─ guards.py  (read-only) │╌╌╌╌╌╌▶│  MCP       │  default
-                       │    ├─ masking    (3 layers)  │        └────────────┘
-                       │    └─ LLM: Copilot relay/API │
-                       └──────────────────────────────┘
+                       │  LangGraph agent    agent/   │   SSE  │  ssh MCP   │  devices
+                       │    ├─ guards.py  (read-only) │───────▶│ via bastion│
+                       │    ├─ masking    (3 layers)  │        ├────────────┤
+                       │    └─ LLM: Copilot relay/API │  stdio │ local probe│  off by
+                       │                              │╌╌╌╌╌╌▶│  MCP       │  default
+                       └──────────────────────────────┘        └────────────┘
 ```
 
 Four layers, each replaceable without touching the others:
@@ -34,7 +35,7 @@ Four layers, each replaceable without touching the others:
 | UI | `frontend/` | The WebSocket message types |
 | API | `api/` | Sessions, the workflow panel's shape |
 | Agent | `agent/` | The LLM, the graph, the guards, masking |
-| Tools | `mcp_tools/` | The office systems: CMDB, Tufin, bastions |
+| Tools | `mcp_tools/` | The office systems: CMDB, Tufin, Archangel alerts, bastions |
 
 The agent has no idea a browser exists. The browser has no idea LangGraph
 exists. That boundary is the reason the Chainlit UI could be replaced without
@@ -148,7 +149,13 @@ The system prompt routes every request into one of four, and only one:
 4. **Firewall policy** — `get_firewall_path` asks Tufin SecureTrack whether the
    traffic is permitted end to end and which rule drops it. Always run, even
    when the ping succeeded: ICMP getting through says nothing about tcp/443.
-5. **Stop and report.** The workflow *ends* at Tufin. Deeper checks are extra
+5. **Open alerts** — `get_alert_and_ticket_details_from_archangel` looks up
+   each device that HAS a CMDB record, by name, and returns the alerts on open
+   tickets. This is context, not a verdict: a link-down alert on the source
+   explains a failure the other four steps only describe. Devices with no CMDB
+   record are skipped, since the lookup is keyed by device name and an IP does
+   not give one.
+6. **Stop and report.** The workflow *ends* there. Deeper checks are extra
    commands on production devices, so they are the user's call.
 
 ### No CMDB record for the source
@@ -162,7 +169,8 @@ this box reach it", which is a different question wearing the same clothes.
 Tufin still works: `get_firewall_path` takes the two addresses, models the
 topology and the policy, and needs no CMDB record. So the run goes CMDB →
 CMDB → Tufin → report, with ping `NOT RUN` and the verdict resting on policy
-alone.
+alone. The alert lookup is skipped too: it is keyed by device name, and the
+CMDB is what turns an address into one.
 
 `mcp_tools/local_probe_mcp.py` implements probes from the agent host and is
 kept, but `LOCAL_PROBES` defaults to off so the tools are not even offered to
@@ -321,7 +329,7 @@ starts a fresh session — the run itself is gone with the socket.
 ```
 netops-react/
 ├── agent/            the agent: graph, prompts, guards, masking, LLM backends
-├── mcp_tools/        the four MCP servers + credential redaction
+├── mcp_tools/        the five MCP servers + credential redaction
 ├── api/              FastAPI: endpoints, run store, panel state
 ├── frontend/src/     React console + chat
 ├── tests/            plain scripts, no pytest; mocks/ for offline runs

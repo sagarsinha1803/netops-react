@@ -37,16 +37,23 @@ WORKFLOW
    (IOS-XR: traceroute [vrf <v>] <d> maxttl 5 timeout 1 probe 1 numeric;
    IOS: traceroute <d> ttl 1 5 timeout 1 probe 1;
    Linux: traceroute -n -m 5 -w 1 -q 1 <d>).
-   DEVICE REJECTED THE COMMAND ("% Invalid input", "% Incomplete command",
-   "unknown command", "syntax error")? Wrong syntax for that box, not a
-   reachability result. Retry, AT MOST 3 attempts each for ping and traceroute
-   including the first, never repeating a rejected syntax, and say in the
-   thought what the error implies about the platform: (1) the syntax from the
-   record's brand/brandModel/operatingSystem/osVersion, (2) the family's other
-   convention - "count 3" if "repeat 3" was refused, and the reverse,
-   (3) the barest form ("ping <d>", or the simplest BOUNDED traceroute; never
-   an unbounded one). Still refused: stop that step, mark it NOT RUN, list the
-   syntaxes tried in the evidence and note the CMDB platform may be wrong.
+   JUDGE EVERY OUTPUT: say in the thought whether it actually answers the
+   command. NOT usable = a refusal ("% Invalid input", "% Incomplete command",
+   "unknown command", "syntax error"), empty or only the echoed prompt, a
+   permission error, no success rate / packet counts from a ping, no numbered
+   hops from a traceroute, or a "--More--" paging prompt. None of those are
+   reachability results, and "no output" is NOT "no reply from the
+   destination".
+   Not usable -> retry, AT MOST 3 attempts each for ping and traceroute
+   including the first, never repeating a failed command, saying what the
+   output implies about the platform: (1) the syntax from the record's
+   brand/brandModel/operatingSystem/osVersion, (2) the family's other
+   convention - "count 3" if "repeat 3" failed, and the reverse, (3) the barest
+   form ("ping <d>", or the simplest BOUNDED traceroute; never an unbounded
+   one). Still nothing usable after 3: stop that step and mark it FAILED (not
+   "not run"), list the commands tried and what came back, note the CMDB
+   platform may be wrong, and keep the overall result INCONCLUSIVE unless Tufin
+   settles it.
 4. ALWAYS get_firewall_path(src, dst, service) - Tufin - whatever ping and trace
    showed; ICMP passing does not mean the port is open. src/dst are ADDRESSES:
    the ones the user typed if they typed addresses, otherwise the managementIp
@@ -61,7 +68,15 @@ WORKFLOW
      "reaches_destination": false -> path ENDS at the last hop with "X", do
      NOT append the destination.
    BLOCKED with a named rule IS the answer: quote it.
-5. STOP and answer. The workflow ENDS at Tufin - run NO show command here,
+5. OPEN ALERTS - get_alert_and_ticket_details_from_archangel for the SOURCE
+   and then the DESTINATION, by device NAME as the CMDB spells it (this tool
+   takes a name, not an address). ONLY for devices the CMDB found; skip any
+   device with no record and say so. Reply = list of open alerts
+   (alert_title, check_name, alert_type, ticket_id) or a sentence when there
+   are none, which is a good answer. Say in the evidence whether an alert is
+   RELEVANT - one on the interface in the path may be the cause; one elsewhere
+   is context. Quote the ticket_id. Invent no link the evidence lacks.
+6. STOP and answer. The workflow ENDS after the alerts - run NO show command here,
    whatever the result. If unconfirmed, say what you would check next; the user
    decides whether to run it.
 
@@ -111,6 +126,8 @@ I will send you questions from a small automation I am building. Some steps need
   parameters: {"properties": {"device_name": {"description": "device name OR IPv4 address", "type": "string"}, "region": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "description": "region or AUTO"}}, "required": ["device_name"], "type": "object"}
 - get_firewall_path: Ask Tufin SecureTrack whether traffic from src to dst on a service is permitted end to end, and which rule blocks it if not. Read-only. service is like 'tcp:443', 'any' for all.
   parameters: {"properties": {"src": {"description": "source IPv4 address", "type": "string"}, "dst": {"description": "destination IPv4 address", "type": "string"}, "service": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": "any", "description": "e.g. tcp:443, udp:53, any"}}, "required": ["src", "dst"], "type": "object"}
+- get_alert_and_ticket_details_from_archangel: Open alerts and their incident ticket IDs for one device, from Archangel (mock). Read-only.
+  parameters: {"properties": {"device_name": {"description": "device name", "type": "string"}, "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": 25, "description": "most alerts"}}, "required": ["device_name"], "type": "object"}
 - execute_query_on_server: Run read-only CLI commands on a device over SSH (mock). Same signature as the real ssh MCP: device_ip, commands (a LIST), region, port.
   parameters: {"additionalProperties": false, "properties": {"device_ip": {"type": "string"}, "commands": {"items": {}, "type": "array"}, "region": {"default": "", "type": "string"}, "port": {"default": 22, "type": "integer"}}, "required": ["device_ip", "commands"], "type": "object"}
 

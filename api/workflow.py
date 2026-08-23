@@ -16,6 +16,7 @@ STEP_DEFS = [
     ("ping", "Basic reachability"),
     ("trace", "Traceroute / path discovery"),
     ("policy", "Firewall policy (Tufin)"),
+    ("alerts", "Open alerts (Archangel)"),
     ("checks", "Deeper checks"),
     ("done", "Conclusion"),
 ]
@@ -80,6 +81,76 @@ def cmdb_record(blob):
     return True, str(data.get("query") or "")
 
 
+def _json_values(text):
+    """Every JSON value in a string, whether it is one array, one object, or
+    several objects run together.
+
+    MCP hands a list back as one content block per element, so a three-row
+    answer arrives as three objects separated by newlines -- NOT as a JSON
+    array. json.loads() sees trailing data and gives up on the lot, which
+    would silently drop every row but the last.
+    """
+    dec = json.JSONDecoder()
+    out, i, n = [], 0, len(text)
+    while i < n:
+        while i < n and text[i] in " \t\r\n,":
+            i += 1
+        if i >= n:
+            break
+        try:
+            value, i = dec.raw_decode(text, i)
+        except ValueError:
+            break                            # keep whatever already parsed
+        out.append(value)
+    return out
+
+
+# the columns the table shows, in the order it shows them
+ALERT_COLUMNS = ("device_name", "alert_title", "check_name", "alert_type",
+                 "ticket_id", "alert_id")
+
+
+def parse_alerts(blob):
+    """(rows, message) from an Archangel reply.
+
+    The tool answers with a LIST of alert dicts, or a sentence when the device
+    has none. Both are useful: the sentence is what the panel shows when there
+    is nothing to tabulate, and it distinguishes "no open alerts" -- a real,
+    good answer -- from a query that failed.
+    """
+    body = str(blob or "").strip()
+    if not body:
+        return [], ""
+    if not body.startswith("[") and not body.startswith("{"):
+        return [], body                     # "No open alerts found ..." / error
+
+    data = _json_values(body)
+    if not data:
+        try:
+            data = [ast.literal_eval(body)]
+        except Exception:
+            return [], body
+
+    # one array of rows, or several rows run together -- flatten either
+    items = []
+    for value in data:
+        items.extend(value if isinstance(value, list) else [value])
+
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        row = {k: ("" if item.get(k) is None else str(item.get(k)))
+               for k in ALERT_COLUMNS}
+        # keep anything the query returned that is not in the fixed column
+        # list, so a schema that grows is visible rather than silently dropped
+        extra = {k: str(v) for k, v in item.items() if k not in ALERT_COLUMNS}
+        if extra:
+            row["extra"] = extra
+        rows.append(row)
+    return rows, ""
+
+
 class Workflow:
     """One run's live state: timeline stages, Basic/Deep command lists, the
     parsed path, and the report(s)."""
@@ -93,6 +164,7 @@ class Workflow:
         self.cmdb_miss = False    # no CMDB record: no device to run commands on,
                                   # so the run goes straight to the policy check
         self.checks = []          # deep-check commands
+        self.alerts = []          # open alerts from Archangel, for the table
         self.basics = []          # the CMDB / ping / traceroute of the main run
         self.summary = {}         # ping_ok, path, hops -- parsed from raw CLI
         self.report = None        # final answer, for the Report tab
@@ -115,7 +187,7 @@ class Workflow:
                 "summary": self.summary, "report": self.report,
                 "deepReport": self.deep_report, "path": self.path,
                 "local": self.local, "cmdbMiss": self.cmdb_miss,
-                "maxDeep": C.DEEP_MAX_LOOPS}
+                "alerts": self.alerts, "maxDeep": C.DEEP_MAX_LOOPS}
 
     # ---- mutation ----------------------------------------------------------
     def reset(self, params=None, scope="path"):
@@ -127,6 +199,7 @@ class Workflow:
         self.path = {"nodes": [], "line": "", "reached": None}
         self.basics = []
         self.checks = []
+        self.alerts = []
         self.summary = {}
         self.report = None
         self.deep_report = None
@@ -168,7 +241,11 @@ class Workflow:
 
     def from_tool_call(self, name, args, command_text):
         """Mark the stage a tool call belongs to as running."""
-        from agent.constants import POLICY_TOOL_NAMES
+        from agent.constants import ALERT_TOOL_NAMES, POLICY_TOOL_NAMES
+        if name in ALERT_TOOL_NAMES:
+            self.set("alerts", "running",
+                     f"open alerts for {args.get('device_name', '')}")
+            return
         if name in POLICY_TOOL_NAMES:
             self.set("policy", "running",
                      f"{args.get('src', '')} → {args.get('dst', '')}"

@@ -367,3 +367,19 @@ body {
   animation: spin 0.8s linear infinite;
 }
 .waitline .clock { margin-left: auto; font-size: 11.5px; }
+
+/* ------------------------------------------------------------ alert table */
+.table-wrap { overflow-x: auto; }
+table.alerts { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.alerts th {
+  text-align: left; padding: 6px 10px; white-space: nowrap;
+  font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--dim); border-bottom: 1px solid var(--border);
+}
+table.alerts td {
+  padding: 7px 10px; border-bottom: 1px solid var(--border);
+  vertical-align: top; overflow-wrap: anywhere;
+}
+table.alerts tr:last-child td { border-bottom: none; }
+table.alerts tbody tr:hover { background: var(--bg-inset); }
+table.alerts td.mono { font-family: ui-monospace, Consolas, monospace; }

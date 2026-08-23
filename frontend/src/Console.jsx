@@ -325,10 +325,57 @@ function ReportBody({ report, answer }) {
 const REPORT_TABS = [
   { key: "report", label: "Report" },
   { key: "path", label: "Path" },
+  { key: "alerts", label: "Alerts" },
   { key: "deep", label: "Deep" },
 ];
 
-function Report({ final, busy, deepRunning, cmdbMiss, onDeep }) {
+// Open alerts from Archangel. A table rather than prose: an engineer scans for
+// the interface in the path and the ticket to open, and both are easier to find
+// in a column than in a sentence.
+function AlertsTable({ alerts }) {
+  const rows = alerts || [];
+  if (!rows.length)
+    return (
+      <div className="hint">
+        No open alerts were returned for these devices — or the devices were
+        not in the CMDB, so there was no name to look them up by.
+      </div>
+    );
+  const tickets = [...new Set(rows.map((r) => r.ticket_id).filter(Boolean))];
+  return (
+    <>
+      <div className="hint" style={{ marginBottom: 8 }}>
+        {rows.length} open alert{rows.length === 1 ? "" : "s"}
+        {tickets.length
+          ? ` across ${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`
+          : ""}
+      </div>
+      <div className="table-wrap">
+        <table className="alerts">
+          <thead>
+            <tr>
+              <th>Device</th><th>Alert</th><th>Check</th>
+              <th>Type</th><th>Ticket</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.alert_id || i} title={r.alert_id ? `alert ${r.alert_id}` : ""}>
+                <td className="mono">{r.device_name}</td>
+                <td>{r.alert_title}</td>
+                <td className="mono">{r.check_name}</td>
+                <td>{r.alert_type}</td>
+                <td className="mono">{r.ticket_id}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function Report({ final, busy, deepRunning, cmdbMiss, alerts, onDeep }) {
   const rep = final.report || {};
   const verdict = rep.result || (rep.text || final.answer ? "ANSWER" : "?");
   const cls = verdictClass(rep.result);
@@ -372,6 +419,9 @@ function Report({ final, busy, deepRunning, cmdbMiss, onDeep }) {
             onClick={() => setTab(t.key)}
           >
             {t.label}
+            {t.key === "alerts" && (alerts || []).length > 0 && (
+              <span className="n">{(alerts || []).length}</span>
+            )}
             {t.key === "deep" && deepRunning && <span className="tab-spin" />}
             {t.key === "deep" && !deepRunning && final.deepReport && (
               <span className="tab-dot" />
@@ -393,6 +443,7 @@ function Report({ final, busy, deepRunning, cmdbMiss, onDeep }) {
             </div>
           </>
         )}
+        {tab === "alerts" && <AlertsTable alerts={alerts} />}
         {tab === "deep" && (
           <>
             {deepRunning && (
@@ -473,7 +524,8 @@ export default function Console({
         )}
         {final && (
           <Report final={final} busy={busy} deepRunning={deepRunning}
-                  cmdbMiss={!!(wf && wf.cmdbMiss)} onDeep={onDeep} />
+                  cmdbMiss={!!(wf && wf.cmdbMiss)}
+                  alerts={(wf && wf.alerts) || []} onDeep={onDeep} />
         )}
       </div>
     </div>

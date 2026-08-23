@@ -185,8 +185,11 @@ _NOT_A_VRF = {"all", "default", "detail", "name", "ipv4", "ipv6", "unicast",
               "address", "family", "description", "vpn-instance"}
 
 _KEYS = {
-    "host": {"name", "hostname", "deviceName", "device"},
+    "host": {"name", "hostname", "deviceName", "device", "device_name"},
     "acl": {"acl", "aclName", "ruleName", "policyName"},
+    # Archangel names the failing interface inside check_name ("Interface
+    # TenGigE0/0/0/14"); the interface pattern picks that out on its own, but
+    # the alert title is free text worth leaving alone.
     "vrf": {"vrf", "incomingVrf", "outgoingVrf"},
     "intf": {"interface", "outgoingInterfaceName", "incomingInterfaceName"},
     "label": {"mpls_label", "mplsOutputLabel"},

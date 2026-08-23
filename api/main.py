@@ -42,15 +42,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent import constants as C                  # noqa: E402
 from agent import graph as net_agent              # noqa: E402
-from agent.constants import (DEVICE_TOOL_NAMES,   # noqa: E402
-                             POLICY_TOOL_NAMES)
+from agent.constants import (ALERT_TOOL_NAMES,    # noqa: E402
+                             DEVICE_TOOL_NAMES, POLICY_TOOL_NAMES)
 from agent.llm import ip_mask                     # noqa: E402
 from agent.prompts import DEEP_CHECK_PROMPT       # noqa: E402
 from agent.utils import display_command           # noqa: E402
 
 from api.workflow import (Workflow, as_report, check_ok,      # noqa: E402
                           cmdb_record, device_label, failed_line,
-                          parse_request, policy_verdict, usable_output)
+                          parse_alerts, parse_request, policy_verdict,
+                          usable_output)
 
 CLIP = C.LLM_MODE == "clipboard"
 
@@ -153,14 +154,18 @@ async def drive(sess: Session, app_graph, config, first_input,
                             cmd = display_command(tc["name"], args)
                             wf.from_tool_call(tc["name"], args, cmd)
                             policy = tc["name"] in POLICY_TOOL_NAMES
+                            alerts = tc["name"] in ALERT_TOOL_NAMES
                             label = (
                                 f"get_firewall_path({args.get('src', '')} → "
                                 f"{args.get('dst', '')}, {args.get('service') or 'any'})"
                                 if policy else
+                                f"alerts({args.get('device_name') or ''})"
+                                if alerts else
                                 f"{tc['name']}({args.get('device_name') or ''})")
                             basic_idx[tc.get("id")] = wf.add_basic(
                                 label, thought=thought,
-                                kind="policy" if policy else "cmdb")
+                                kind="policy" if policy else
+                                     "alerts" if alerts else "cmdb")
                         continue
                     cmd = display_command(tc["name"], args)
                     where = (args.get("device_ip") or args.get("source")
@@ -206,6 +211,26 @@ async def drive(sess: Session, app_graph, config, first_input,
                                else "failed" if verdict == "BLOCKED" else "skipped",
                                (f"Traffic {verdict.lower()}"
                                 + (f" by {acl}" if acl else "")))
+                    elif wf.basics[basic_idx[tid]].get("kind") == "alerts":
+                        rows, message = parse_alerts(body)
+                        # a device with no open alerts is a good answer, not a
+                        # failure -- only a query that could not run is
+                        failed = bool(message) and "no open alerts" not in                             message.lower()
+                        for row in rows:
+                            if row not in wf.alerts:
+                                wf.alerts.append(row)
+                        wf.finish_basic(
+                            basic_idx[tid], not failed,
+                            f"{len(rows)} open alert(s)" if rows
+                            else (message[:70] or "no open alerts"),
+                            device="Archangel", output=body)
+                        tickets = {r.get("ticket_id") for r in wf.alerts
+                                   if r.get("ticket_id")}
+                        wf.set("alerts",
+                               "failed" if failed else "done",
+                               f"{len(wf.alerts)} alert(s), {len(tickets)} ticket(s)"
+                               if wf.alerts else
+                               (message[:60] or "no open alerts"))
                     elif wf.basics[basic_idx[tid]].get("kind") == "cmdb":
                         found, label = cmdb_record(body)
                         wf.finish_basic(basic_idx[tid], found,
@@ -342,7 +367,7 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         why = (f"skipped - {down} MCP unavailable" if down
                else "not run - the agent concluded before this step")
         stages = (("cmdb",) if wf.scope == "lookup"
-                  else ("cmdb", "ping", "trace", "policy"))
+                  else ("cmdb", "ping", "trace", "policy", "alerts"))
         for key in stages:
             if wf.state[key]["status"] not in ("pending", "running"):
                 continue

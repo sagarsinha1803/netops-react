@@ -24,6 +24,8 @@ netops-react/
 ├── mcp_tools/
 │   ├── unicorn_mcp.py          get_device_details        (CMDB)
 │   ├── tufin_mcp.py            get_firewall_path         (SecureTrack)
+│   ├── alert_mcp.py            get_alert_and_ticket_details_from_archangel
+│   │                           one read-only SELECT, bound parameters
 │   ├── troubleshoot_agent_mcp.py  execute_query_on_server (SSH via bastion)
 │   └── local_probe_mcp.py      local_ping / local_traceroute — OFF unless
 │                               LOCAL_PROBES=1; args are a validated IP only
@@ -36,7 +38,8 @@ netops-react/
 │   └── src/App.jsx · Console.jsx · ChatPanel.jsx · styles.css
 │                               agent console, not a chat: command bar, stage
 │                               strip, collapsible activity feed, tabbed report
-│                               (Report / Path / Deep), optional chat drawer.
+│                               (Report / Path / Alerts / Deep), optional chat
+│                               drawer.
 │                               Light/dark theme button, persisted.
 │
 └── tests/                      same suite as netops, plus test_local_probe.py
@@ -123,6 +126,7 @@ IP/name masking for the clipboard relay.
 .venv\Scripts\python.exe tests\test_command_status.py # refusal vs result vs silence
 .venv\Scripts\python.exe tests\test_tufin_shape.py    # SecureTrack reply shapes
 .venv\Scripts\python.exe tests\test_cmdb_record.py    # found vs not-found
+.venv\Scripts\python.exe tests\test_alerts.py        # Archangel rows -> the table
 .venv\Scripts\python.exe tests\test_api_mask.py       # masking through an API model
 .venv\Scripts\python.exe tests\test_local_probe.py    # the optional local probes
 .venv\Scripts\python.exe tests\test_ip_mask.py
@@ -149,3 +153,12 @@ tool change:
 ```powershell
 $env:USE_MOCKS="1"; .venv\Scripts\python.exe -m agent.llm.clipboard_llm
 ```
+
+**They no longer fit.** With the alert step and the retry ladder the text is
+~10,100 characters against a Copilot instruction box of roughly 8,000, so
+`CLIP_MODE=agent` needs `SYSTEM_PROMPT_COMPACT` trimmed by about a third
+first — and every line in it is a rule the runs depend on, so that is a
+deliberate choice about which rules to lose, not a formatting job.
+
+`CLIP_MODE=delta` (the default) and `full` are unaffected: they paste the
+system prompt into the chat itself, where no such limit applies.

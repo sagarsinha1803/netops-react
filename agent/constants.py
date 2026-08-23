@@ -64,6 +64,7 @@ LOCAL_PROBES = os.environ.get("LOCAL_PROBES", "").lower() in ("1", "true", "yes"
 MCP_SERVERS = {
     "unicorn": _stdio(MCP_DIR, "unicorn_mcp.py"),          # get_device_details
     "tufin":   _stdio(MCP_DIR, "tufin_mcp.py"),            # get_firewall_path
+    "archangel": _stdio(MCP_DIR, "alert_mcp.py"),          # open alerts + tickets
     "ssh":     SSH_SERVER,                                 # execute_query_on_server
 }
 
@@ -71,6 +72,7 @@ if USE_MOCKS:
     MCP_SERVERS = {
         "unicorn": _stdio(MOCK_DIR, "unicorn_mock.py"),
         "tufin":   _stdio(MOCK_DIR, "tufin_mock.py"),
+        "archangel": _stdio(MOCK_DIR, "alert_mock.py"),
         "ssh":     _stdio(MOCK_DIR, "device_mock.py"),
     }
 
@@ -96,6 +98,10 @@ DEVICE_TOOL_NAMES = {"execute_query_on_server", "ping_device", "traceroute_devic
                      "local_ping", "local_traceroute"}
 # tools that ask Tufin rather than a device
 POLICY_TOOL_NAMES = {"get_firewall_path"}
+# tools that ask Archangel for outstanding alerts. Like tufin, NOT in
+# DEVICE_SERVERS: it is a read-only SELECT against a database, it runs nothing
+# on a device, and gating it would put an approval in front of every lookup.
+ALERT_TOOL_NAMES = {"get_alert_and_ticket_details_from_archangel"}
 
 # ---- behaviour ---------------------------------------------------------------
 REQUIRE_APPROVAL = True

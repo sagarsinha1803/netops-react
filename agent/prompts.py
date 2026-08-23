@@ -163,7 +163,22 @@ WORKFLOW (in order, one tool call at a time):
    "unrouted_elements" means the topology has no route at all for that pair.
    A BLOCKED verdict with a named ACL IS the answer -- quote the ACL in the
    evidence and the cause rather than probing further.
-5. STOP. The basic workflow ends at Tufin. Go straight to the final answer.
+5. OPEN ALERTS -- call get_alert_and_ticket_details_from_archangel for the
+   SOURCE device, and again for the DESTINATION, using the device NAME as the
+   CMDB record spells it (this one takes a name, not an address: Archangel is
+   keyed by device name).
+   ONLY for devices the CMDB actually returned a record for. A device with no
+   CMDB record has no name to look up, so skip it and say so.
+   The reply is a list of open alerts, each with alert_title, check_name,
+   alert_type and the incident ticket_id, or a sentence when there are none --
+   which is a good answer, not a failure.
+   Read them for RELEVANCE and say so in the evidence: an alert about the
+   interface on the path ("LinkStatusOperDown" on the egress interface) may be
+   the cause of what you measured, while an unrelated alert on another
+   interface is context, not cause. Quote the ticket_id when you name one, so
+   an engineer can open it. Do not invent a link between an alert and the
+   result that the evidence does not support.
+6. STOP. The basic workflow ends after the alerts. Go straight to the final answer.
    Run NO show command here, however inconclusive the result looks: the deeper
    checks are extra commands on production devices, and it is the user's call
    whether to run them. If reachability is unconfirmed, say so and say what you
@@ -329,7 +344,15 @@ WORKFLOW
      "reaches_destination": false -> path ENDS at the last hop with "X", do
      NOT append the destination.
    BLOCKED with a named rule IS the answer: quote it.
-5. STOP and answer. The workflow ENDS at Tufin - run NO show command here,
+5. OPEN ALERTS - get_alert_and_ticket_details_from_archangel for the SOURCE
+   and then the DESTINATION, by device NAME as the CMDB spells it (this tool
+   takes a name, not an address). ONLY for devices the CMDB found; skip any
+   device with no record and say so. Reply = list of open alerts
+   (alert_title, check_name, alert_type, ticket_id) or a sentence when there
+   are none, which is a good answer. Say in the evidence whether an alert is
+   RELEVANT - one on the interface in the path may be the cause; one elsewhere
+   is context. Quote the ticket_id. Invent no link the evidence lacks.
+6. STOP and answer. The workflow ENDS after the alerts - run NO show command here,
    whatever the result. If unconfirmed, say what you would check next; the user
    decides whether to run it.
 
