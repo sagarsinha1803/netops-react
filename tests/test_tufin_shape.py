@@ -146,6 +146,31 @@ check("a permitted path reads as ALLOWED from raw", verdict == "ALLOWED", verdic
 verdict, _ = policy_verdict("Error calling Tufin: connection refused")
 check("a tool error is still UNKNOWN, not a verdict", verdict == "UNKNOWN", verdict)
 
+# ---- src/dst must be addresses ---------------------------------------------
+# Asked by NAME, the model has device names in hand and reaches for them. Tufin
+# matches its topology by address, so a name matches nothing and the API answers
+# about a pair that does not exist -- which reads as a real verdict.
+from mcp_tools.tufin_mcp import get_firewall_path, _looks_like_ip   # noqa: E402
+
+check("an IPv4 address is accepted", _looks_like_ip("198.51.100.10"))
+check("an address with a prefix length is accepted", _looks_like_ip("198.51.100.10/24"))
+check("an IPv6 address is accepted", _looks_like_ip("2001:db8::1"))
+check("a device name is not an address", not _looks_like_ip("SW-EXAMPLE-01"))
+check("an empty value is not an address", not _looks_like_ip(""))
+
+refused = get_firewall_path("SW-EXAMPLE-01", "SW-EXAMPLE-02", "tcp:22")
+check("names are refused rather than silently queried",
+      isinstance(refused, str) and "IP ADDRESSES" in refused, str(refused)[:70])
+check("and the refusal says where to get the address",
+      "managementIp" in refused, str(refused)[:70])
+check("the refusal names which argument was wrong",
+      "src=" in refused and "dst=" in refused, str(refused)[:90])
+
+half = get_firewall_path("198.51.100.10", "SW-EXAMPLE-02")
+check("one good, one bad is still refused, naming only the bad one",
+      isinstance(half, str) and "dst=" in half and "src=" not in half,
+      str(half)[:90])
+
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")
 sys.exit(1 if fails else 0)

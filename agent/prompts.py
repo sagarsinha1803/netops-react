@@ -96,11 +96,15 @@ WORKFLOW (in order, one tool call at a time):
      Huawei/Comware : tracert -m 5 <dest>
    ALWAYS run it, even when the ping succeeded -- the path is part of the answer.
    If 5 hops is not enough, say so and raise it once, to 10.
-4. ALWAYS call get_firewall_path (Tufin SecureTrack) with the source and
-   destination addresses and the service, whatever the ping and traceroute
-   showed. It answers whether any firewall on the path permits the traffic, and
-   names the rule that drops it if not. Run it even when the ping succeeded:
-   ICMP getting through does not mean the application port does.
+4. ALWAYS call get_firewall_path (Tufin SecureTrack) with the service and the
+   two ADDRESSES -- src and dst must be the managementIp values from the CMDB
+   records of step 1, NEVER the device names, even when the user asked using
+   names. SecureTrack looks the pair up in its topology by address; a hostname
+   matches nothing there and comes back as an answer about no traffic at all.
+   Call it whatever the ping and traceroute showed: it answers whether any
+   firewall on the path permits the traffic, and names the rule that drops it
+   if not. Run it even when the ping succeeded -- ICMP getting through does not
+   mean the application port does.
      service: "tcp:<port>" / "udp:<port>" when the user named a protocol and
      port, otherwise "any".
    Read the result: "verdict" is ALLOWED, BLOCKED or UNKNOWN;
@@ -203,8 +207,9 @@ USING execute_query_on_server:
 - "region" is REQUIRED -- pass back the region string the CMDB lookup returned
   for the SOURCE device, exactly as it was given. Do not invent one, and do not
   translate it: the tool validates it against the configured regions.
-- Run on the SOURCE: device_ip is the source device; the destination goes inside
-  the command text.
+- Run on the SOURCE: device_ip is the SOURCE device's managementIp from its
+  CMDB record -- an address, never a name. The destination goes inside the
+  command text, and there it is the destination's managementIp too.
 - Write function names and argument names plainly: get_device_details, not
   get\\_device\\_details. No markdown escaping anywhere in the JSON.
 """
@@ -249,8 +254,10 @@ WORKFLOW
    IOS: traceroute <d> ttl 1 5 timeout 1 probe 1;
    Linux: traceroute -n -m 5 -w 1 -q 1 <d>).
 4. ALWAYS get_firewall_path(src, dst, service) - Tufin - whatever ping and trace
-   showed; ICMP passing does not mean the port is open. service =
-   "tcp:<port>"/"udp:<port>" if named, else "any". Read "verdict"
+   showed; ICMP passing does not mean the port is open. src and dst are the
+   managementIp ADDRESSES from step 1, NEVER the device names, even if the user
+   asked by name: SecureTrack matches its topology by address and a hostname
+   finds nothing. service = "tcp:<port>"/"udp:<port>" if named, else "any". Read "verdict"
    (ALLOWED|BLOCKED|UNKNOWN), "blocking_rules" (action + rule name),
    "unrouted_elements", and:
      "hops" - a step with two devices means ALTERNATIVES, one hop "A / B";
@@ -282,8 +289,9 @@ READ-ONLY only: ping, traceroute/tracert, show/display. A human approves every
 device command; if one is rejected, continue and say so.
 
 execute_query_on_server: "commands" is a LIST even for one command; "region" is
-required and comes from the CMDB lookup; device_ip is the SOURCE and the
-destination goes inside the command text. Write names plainly, no backslashes.
+required and comes from the CMDB lookup; device_ip is the SOURCE's managementIp
+(an address, never a name) and the destination's managementIp goes inside the
+command text. Write names plainly, no backslashes.
 NEVER put double quotes inside a command: they break the JSON of your reply
 and the run stops. Filter on ONE unquoted word - | include Label - and run the
 command again if you need another field.

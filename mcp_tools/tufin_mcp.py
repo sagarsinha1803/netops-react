@@ -16,6 +16,7 @@
 #   TUFIN_USER: apiuser
 #   TUFIN_PASSWORD: ...
 #   TUFIN_VERIFY_SSL: false
+import ipaddress
 import os
 import sys
 from typing import Annotated, Optional
@@ -276,6 +277,16 @@ def summarise_verbose(payload: dict) -> dict:
             "devices": [_slim_device(d) for d in devices]}
 
 
+def _looks_like_ip(value) -> bool:
+    """True for an IPv4/IPv6 address, with or without a prefix length."""
+    text = str(value or "").strip().split("/")[0]
+    try:
+        ipaddress.ip_address(text)
+        return True
+    except ValueError:
+        return False
+
+
 # ---- tool --------------------------------------------------------------------
 @mcp.tool(
     name="get_firewall_path",
@@ -283,11 +294,29 @@ def summarise_verbose(payload: dict) -> dict:
                 "service is permitted end to end, and which rule blocks it if "
                 "not. Read-only. service is like 'tcp:443', 'any' for all.")
 def get_firewall_path(
-    src: Annotated[str, Field(description="source IPv4 address")],
-    dst: Annotated[str, Field(description="destination IPv4 address")],
+    src: Annotated[str, Field(
+        description="source IP ADDRESS (the managementIp from the CMDB "
+                    "record) -- not a device name")],
+    dst: Annotated[str, Field(
+        description="destination IP ADDRESS (the managementIp from the CMDB "
+                    "record) -- not a device name")],
     service: Annotated[Optional[str],
                        Field(description="e.g. tcp:443, udp:53, any")] = "any",
 ) -> dict | str:
+    # SecureTrack matches its topology by address. A hostname matches nothing,
+    # and the API answers about a pair that does not exist rather than
+    # complaining -- which reads as a real verdict. Refuse it here instead, and
+    # say where the address comes from, because the model asked by name has the
+    # CMDB record in front of it.
+    bad = [f"{label}={value!r}" for label, value in (("src", src), ("dst", dst))
+           if not _looks_like_ip(value)]
+    if bad:
+        return ("get_firewall_path needs IP ADDRESSES, not device names: "
+                + ", ".join(bad)
+                + ". Use the managementIp from each device's CMDB record "
+                  "(get_device_details). SecureTrack looks the pair up in its "
+                  "topology by address, so a name silently matches nothing.")
+
     if not Settings.URL:
         return ("Tufin is not configured: add TUFIN_URL, TUFIN_USER and "
                 "TUFIN_PASSWORD to credentials.yml.")
