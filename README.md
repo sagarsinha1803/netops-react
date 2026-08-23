@@ -118,15 +118,65 @@ Read-only allowlist in code, human approval on every device command, Tufin
 ungated (read-only GET), credential redaction at the MCP boundary, reversible
 IP/name masking for the clipboard relay.
 
+## Checking the whole flow
+
+Four levels, cheapest first. The first three need no credentials, no devices
+and no Copilot.
+
+**1. One command, everything mocked.** Starts the scripted model, opens the
+app's own `/ws` socket, sends what the browser sends, approves each command
+and reads the panel that comes back:
+
+```powershell
+.venv\Scripts\python.exe tests\test_ws_flow.py
+```
+
+It prints every stage with its status, then the alert rows, then the checks.
+Takes about a minute — the mock MCP servers are real subprocesses. This is the
+one that catches breaks BETWEEN the pieces; the unit tests each mock the thing
+next to them, which is how one real defect passed all of them.
+
+**2. The same run, in the browser.** Two terminals:
+
+```powershell
+.venv\Scripts\python.exe tests\fake_llm.py 11499
+```
+
+```powershell
+$env:LLM_MODE="api"; $env:LLM_BASE_URL="http://127.0.0.1:11499/v1"; .\run.ps1 -Mock
+```
+
+Ask for `10.10.1.20` to `172.20.5.10` on `tcp:443`. Expect: CMDB green, ping
+red (it is meant to fail), traceroute green, Tufin red with DENY-ALL, Alerts
+green reading `4 alert(s), 3 ticket(s)`, and four rows in the Alerts tab across
+two devices. The Path tab ends in `X` at the firewall.
+
+**3. Each back end on its own**, once credentials.yml is filled in — this
+separates "the database or API is wrong" from "the agent is wrong":
+
+```powershell
+.venv\Scripts\python.exe mcp_tools\alert_mcp.py --check <DEVICE NAME>
+```
+
+It prints the URL with the password blanked, then the rows or the reason there
+are none. `No open alerts found` is a good answer; `Error querying Archangel`
+is a connection, driver or permission problem, and the exception says which.
+
+**4. The real run.** `.\run.ps1`, credentials in place, model configured, two
+devices the CMDB knows. Watch that the alert lookup uses the NAME the CMDB
+returned: if the alerts stage is skipped, the CMDB record is what is missing,
+not the alert database.
+
 ## Tests
 
 ```powershell
+.venv\Scripts\python.exe tests\test_ws_flow.py        # the whole flow over /ws
 .venv\Scripts\python.exe tests\test_guards.py         # read-only enforcement
 .venv\Scripts\python.exe tests\test_flow.py           # whole graph (set USE_MOCKS=1)
 .venv\Scripts\python.exe tests\test_command_status.py # refusal vs result vs silence
 .venv\Scripts\python.exe tests\test_tufin_shape.py    # SecureTrack reply shapes
 .venv\Scripts\python.exe tests\test_cmdb_record.py    # found vs not-found
-.venv\Scripts\python.exe tests\test_alerts.py        # Archangel rows -> the table
+.venv\Scripts\python.exe tests\test_alerts.py         # Archangel rows -> the table
 .venv\Scripts\python.exe tests\test_api_mask.py       # masking through an API model
 .venv\Scripts\python.exe tests\test_local_probe.py    # the optional local probes
 .venv\Scripts\python.exe tests\test_ip_mask.py
@@ -135,13 +185,6 @@ IP/name masking for the clipboard relay.
 .venv\Scripts\python.exe tests\test_relay_mask.py
 .venv\Scripts\python.exe tests\test_relay_delta.py
 .venv\Scripts\python.exe tests\test_reply_parsing.py
-```
-
-UI run with no Copilot and no devices:
-
-```powershell
-.venv\Scripts\python.exe tests\fake_llm.py 11499
-$env:LLM_MODE="api"; $env:LLM_BASE_URL="http://127.0.0.1:11499/v1"; .\run.ps1 -Mock
 ```
 
 ## Copilot agent instructions

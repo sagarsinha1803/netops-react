@@ -16,7 +16,7 @@ STEP_DEFS = [
     ("ping", "Basic reachability"),
     ("trace", "Traceroute / path discovery"),
     ("policy", "Firewall policy (Tufin)"),
-    ("alerts", "Open alerts (Archangel)"),
+    ("alerts", "Alerts"),
     ("checks", "Deeper checks"),
     ("done", "Conclusion"),
 ]

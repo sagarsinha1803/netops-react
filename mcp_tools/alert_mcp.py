@@ -63,6 +63,17 @@ _SQL = """
      limit :limit
 """
 
+def _redacted_url():
+    """The DB URL with the password blanked, for printing."""
+    url = Settings.DB_URL
+    if "://" in url and "@" in url:
+        scheme, rest = url.split("://", 1)
+        creds, host = rest.rsplit("@", 1)
+        user = creds.split(":", 1)[0]
+        return f"{scheme}://{user}:***@{host}"
+    return url
+
+
 _ENGINE = None
 
 
@@ -132,4 +143,23 @@ def get_alert_and_ticket_details_from_archangel(
 
 
 if __name__ == "__main__":
+    # `python mcp_tools/alert_mcp.py --check SW-EDGE-01` runs the one query
+    # against the real database and prints what came back -- the quickest way
+    # to tell a credentials/driver/spelling problem apart from an agent one,
+    # without starting the app.
+    if "--check" in sys.argv:
+        args = [a for a in sys.argv[1:] if a != "--check"]
+        if not args:
+            print("usage: alert_mcp.py --check <DEVICE NAME>")
+            raise SystemExit(2)
+        print(f"ARCHANGEL_DB_URL: {_redacted_url() or '(not set)'}")
+        answer = get_alert_and_ticket_details_from_archangel(args[0])
+        if isinstance(answer, str):
+            print(answer)
+        else:
+            print(f"{len(answer)} row(s):")
+            for row in answer:
+                print("  ", row)
+        raise SystemExit(0)
+
     mcp.run()   # stdio
