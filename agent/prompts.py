@@ -97,10 +97,15 @@ WORKFLOW (in order, one tool call at a time):
    ALWAYS run it, even when the ping succeeded -- the path is part of the answer.
    If 5 hops is not enough, say so and raise it once, to 10.
 4. ALWAYS call get_firewall_path (Tufin SecureTrack) with the service and the
-   two ADDRESSES -- src and dst must be the managementIp values from the CMDB
-   records of step 1, NEVER the device names, even when the user asked using
-   names. SecureTrack looks the pair up in its topology by address; a hostname
-   matches nothing there and comes back as an answer about no traffic at all.
+   two ADDRESSES:
+     - the user typed ADDRESSES -> use those, they are already what is needed;
+     - the user typed NAMES -> use the managementIp from that device's CMDB
+       record, never the name itself;
+     - a record with NO managementIp -> the policy check cannot be run for that
+       pair. Say so in the evidence and leave the verdict INCONCLUSIVE. Do not
+       fall back to the name.
+   SecureTrack looks the pair up in its topology by address; a hostname matches
+   nothing there and comes back as an answer about no traffic at all.
    Call it whatever the ping and traceroute showed: it answers whether any
    firewall on the path permits the traffic, and names the rule that drops it
    if not. Run it even when the ping succeeded -- ICMP getting through does not
@@ -254,10 +259,13 @@ WORKFLOW
    IOS: traceroute <d> ttl 1 5 timeout 1 probe 1;
    Linux: traceroute -n -m 5 -w 1 -q 1 <d>).
 4. ALWAYS get_firewall_path(src, dst, service) - Tufin - whatever ping and trace
-   showed; ICMP passing does not mean the port is open. src and dst are the
-   managementIp ADDRESSES from step 1, NEVER the device names, even if the user
-   asked by name: SecureTrack matches its topology by address and a hostname
-   finds nothing. service = "tcp:<port>"/"udp:<port>" if named, else "any". Read "verdict"
+   showed; ICMP passing does not mean the port is open. src/dst are ADDRESSES:
+   the ones the user typed if they typed addresses, otherwise the managementIp
+   from that device's CMDB record - NEVER the name, since SecureTrack matches
+   its topology by address and a hostname finds nothing. No managementIp in the
+   record -> say the policy check could not be run, verdict INCONCLUSIVE, and
+   do not fall back to the name.
+   service = "tcp:<port>"/"udp:<port>" if named, else "any". Read "verdict"
    (ALLOWED|BLOCKED|UNKNOWN), "blocking_rules" (action + rule name),
    "unrouted_elements", and:
      "hops" - a step with two devices means ALTERNATIVES, one hop "A / B";

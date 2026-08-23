@@ -38,10 +38,13 @@ WORKFLOW
    IOS: traceroute <d> ttl 1 5 timeout 1 probe 1;
    Linux: traceroute -n -m 5 -w 1 -q 1 <d>).
 4. ALWAYS get_firewall_path(src, dst, service) - Tufin - whatever ping and trace
-   showed; ICMP passing does not mean the port is open. src and dst are the
-   managementIp ADDRESSES from step 1, NEVER the device names, even if the user
-   asked by name: SecureTrack matches its topology by address and a hostname
-   finds nothing. service = "tcp:<port>"/"udp:<port>" if named, else "any". Read "verdict"
+   showed; ICMP passing does not mean the port is open. src/dst are ADDRESSES:
+   the ones the user typed if they typed addresses, otherwise the managementIp
+   from that device's CMDB record - NEVER the name, since SecureTrack matches
+   its topology by address and a hostname finds nothing. No managementIp in the
+   record -> say the policy check could not be run, verdict INCONCLUSIVE, and
+   do not fall back to the name.
+   service = "tcp:<port>"/"udp:<port>" if named, else "any". Read "verdict"
    (ALLOWED|BLOCKED|UNKNOWN), "blocking_rules" (action + rule name),
    "unrouted_elements", and:
      "hops" - a step with two devices means ALTERNATIVES, one hop "A / B";
