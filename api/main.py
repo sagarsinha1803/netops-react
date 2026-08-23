@@ -49,7 +49,7 @@ from agent.prompts import DEEP_CHECK_PROMPT       # noqa: E402
 from agent.utils import display_command           # noqa: E402
 
 from api.workflow import (Workflow, as_report, check_ok,      # noqa: E402
-                          device_label, failed_line,
+                          cmdb_record, device_label, failed_line,
                           parse_request, policy_verdict)
 
 CLIP = C.LLM_MODE == "clipboard"
@@ -203,10 +203,10 @@ async def drive(sess: Session, app_graph, config, first_input,
                                (f"Traffic {verdict.lower()}"
                                 + (f" by {acl}" if acl else "")))
                     elif wf.basics[basic_idx[tid]].get("kind") == "cmdb":
-                        found = device_label(body, "")
-                        wf.finish_basic(basic_idx[tid], bool(found),
+                        found, label = cmdb_record(body)
+                        wf.finish_basic(basic_idx[tid], found,
                                         "" if found else "not found in CMDB",
-                                        device=found or None, output=body)
+                                        device=label or None, output=body)
                     else:
                         wf.finish_basic(basic_idx[tid], ok, detail[:70],
                                         output=body)

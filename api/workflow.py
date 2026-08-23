@@ -5,6 +5,7 @@ route, no element re-mounting, no publish bookkeeping -- the React client gets
 the whole snapshot on every change and renders it in place, which is the entire
 reason for leaving Chainlit.
 """
+import ast
 import json
 import re
 
@@ -41,6 +42,42 @@ def device_label(blob, fallback):
         pass
     m = _NAME_IN_BLOB.search(str(blob))
     return m.group(1) if m else fallback
+
+
+def cmdb_record(blob):
+    """(found, label) for one CMDB reply.
+
+    "Found" must not be decided by whether the record carries a hostname. A
+    lookup BY NAME deliberately returns no `name` field -- it would only echo
+    the caller's own input back -- so judging on that marked a perfectly good
+    Arista record as "not found in CMDB", with a red cross on the row while
+    the stage above it stayed green off the same data.
+
+    What settles it is whether a RECORD came back at all: the tool answers
+    with a dict on success and a plain "No data found ..." sentence on a miss.
+    """
+    body = str(blob or "").strip()
+    if not body.startswith("{"):
+        return False, ""                     # "No data found ...", or an error
+    data = None
+    for loader in (json.loads, ast.literal_eval):
+        try:
+            got = loader(body)
+            if isinstance(got, dict):
+                data = got
+                break
+        except Exception:
+            continue
+    if not data:
+        return False, ""
+    record = data.get("data") if isinstance(data.get("data"), dict) else data
+    if not record:
+        return False, ""
+    for key in _NAME_KEYS:
+        if record.get(key):
+            return True, str(record[key])
+    # a record with no hostname field: name it by what was asked for
+    return True, str(data.get("query") or "")
 
 
 class Workflow:
@@ -226,11 +263,11 @@ class Workflow:
         devices = state.get("devices") or {}
         if devices:
             # devices holds EVERY lookup, hits and misses alike. A hit is a
-            # record (dict, so its text starts with "{"); a miss is the plain
-            # "No data found ..." / "Error ..." sentence the CMDB returns. A
-            # green tick for a lookup that found nothing is a lie -- mark it.
-            found = [k for k, v in devices.items()
-                     if str(v).strip().startswith("{")]
+            # record; a miss is the plain "No data found ..." / "Error ..."
+            # sentence the CMDB returns. A green tick for a lookup that found
+            # nothing is a lie -- mark it. Same test as the rows use, so the
+            # stage and the rows below it can never disagree.
+            found = [k for k, v in devices.items() if cmdb_record(v)[0]]
             missed = len(devices) - len(found)
             if not found:
                 self.set("cmdb", "failed", "no record in CMDB")
