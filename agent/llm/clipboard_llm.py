@@ -495,8 +495,8 @@ def agent_instructions(system_prompt: str, schemas: List[dict]) -> str:
 # into a Context_.txt attachment, so this warns if the text grows too big.
 INSTRUCTION_LIMIT = 7000
 
-# The agent only ever calls these. A mock run also exposes calculator,
-# word_length and get_device, which would just be noise in the instructions.
+# The agent only ever calls these; anything else a server offers is noise in
+# the instructions.
 # The tools the agent always has. The local probes are optional (LOCAL_PROBES)
 # and are included only when they were actually loaded, so their absence is
 # not reported as something missing.

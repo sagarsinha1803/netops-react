@@ -1,7 +1,11 @@
-"""Test MCP server (FastMCP) -- small tools for exercising the UI/tool loop.
+"""Mock of the DEVICE (ssh) MCP server: runs commands, touches no device.
 
-No devices, no credentials: calculator/word_length plus mock network tools that
-mimic the shape of the real unicorn + ssh MCPs.
+It must expose only what the real one does. It used to carry a calculator, a
+word_length and a get_device -- and a model, offered a get_device sitting
+beside get_device_details, picked it: a CMDB lookup that lives on the device
+server is device-touching by the gate's rule, so a plain inventory lookup
+started asking for human approval. A mock that offers tools the real server
+does not is not a mock, it is a different system.
 
     python tools_mcp.py            # stdio
 
@@ -24,30 +28,6 @@ _DEVICES = {
                     "vendor": "cisco", "os": "NX-OS", "region": "INDIA"},
 }
 _UNREACHABLE = {"172.20.5.10"}     # ping fails for these -> exercises the fail path
-
-
-@mcp.tool()
-def calculator(expr: str) -> str:
-    """Evaluate a math expression, e.g. '23*7+1'."""
-    try:
-        return str(eval(expr, {"__builtins__": {}}, {}))
-    except Exception as e:
-        return f"error: {e}"
-
-
-@mcp.tool()
-def word_length(word: str) -> str:
-    """Count the characters in a word."""
-    return str(len(word.strip().strip("'\"")))
-
-
-@mcp.tool()
-def get_device(device_name: str) -> dict:
-    """Look up a device in the (mock) CMDB by name or IP. Returns vendor, os, region."""
-    dev = _DEVICES.get(device_name.strip())
-    if not dev:
-        return {"found": False, "device_name": device_name}
-    return {"found": True, "region": dev["region"], "data": dev}
 
 
 @mcp.tool()

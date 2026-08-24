@@ -222,7 +222,10 @@ function Approval({ approval, onApproval }) {
         <div className="t">Approval required</div>
         <div className="c mono">{String(p.command || "")}</div>
         <div className="w">
-          on {String(p.device_ip || "?")}
+          {/* "on ?" told the reviewer nothing about what they were approving,
+              and the honest answer to that is always Reject. A tool that names
+              no device is not being run on one. */}
+          {p.device_ip ? `on ${p.device_ip}` : `${p.tool || "tool"} · no device`}
           {p.region ? ` · ${p.region}` : ""} · read-only, validated in code
         </div>
       </div>

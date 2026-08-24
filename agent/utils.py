@@ -90,4 +90,8 @@ def display_command(name: str, args: dict) -> str:
             count = args.get("count")
             return f"ping {dest}" + (f" repeat {count}" if count else "")
         return f"{args.get('source')} -> {dest}"
-    return json.dumps(args, default=str)
+    # Anything else: name the TOOL, not just its arguments. A card reading
+    # {"device_name": "172.20.5.10"} on ? asks a reviewer to approve something
+    # it never identifies -- and the honest answer to that is always "reject".
+    inner = ", ".join(f"{k}={v}" for k, v in args.items()) if args else ""
+    return f"{name}({inner})"
