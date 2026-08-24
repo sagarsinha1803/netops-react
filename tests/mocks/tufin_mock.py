@@ -27,6 +27,24 @@ mcp = FastMCP("tufin-server")
 _BLOCKED_DESTS = S.BLOCKED_DESTS
 
 
+def _chain(dst: str):
+    """The device chain SecureTrack would model for this destination.
+
+    Built from the same scenario the traceroute answers from, so the two
+    drawings in the Path tab are about the same network. They still disagree
+    where they should: SecureTrack models the topology and the rules, and a
+    link that went down five minutes ago is not in either.
+    """
+    trace = S.TRACE.get(dst) or {}
+    names = [name for name, _ip, _rtt in trace.get("hops", [])]
+    # SecureTrack sees the firewall in the middle; the traceroute only sees it
+    # if it answers probes
+    if not names:
+        names = ["RTR-EXAMPLE-02"]
+    edge = "FW-DC1-EDGE-01"
+    return [n for n in names if n != S.resolve(dst)] + [edge]
+
+
 def _payload(src: str, dst: str, service: str, blocked: bool) -> dict:
     rule = {
         "sources": ["any"], "sourceNegated": False,
@@ -38,41 +56,35 @@ def _payload(src: str, dst: str, service: str, blocked: bool) -> dict:
                     S.POLICY_RULES.get(dst, "PERMIT-INTRA-DC")),
         "name": "",
     }
+
+    chain = _chain(dst)
+    devices = []
+    for i, name in enumerate(chain):
+        last = i == len(chain) - 1
+        devices.append({
+            "id": 7000 + i,
+            "name": name,
+            "type": "firewall" if last else "router",
+            "vendor": "Checkpoint" if last else "Cisco",
+            "incomingInterfaces": [
+                {"name": "Loopback99" if i == 0 else f"TenGigE0/0/0/{i}",
+                 "ip": f"{src}/32" if i == 0 else None,
+                 "incomingVrf": None},
+            ],
+            "nextDevices": ([] if last else
+                            [{"name": chain[i + 1], "routes": [
+                                {"routeDestination": f"{dst}/32",
+                                 "nextHopIp": "203.0.113.45",
+                                 "outgoingInterfaceName": f"TenGigE0/0/0/{i}",
+                                 "mplsOutputLabel": "27084"}]}]),
+            "rules": [rule] if (last or i == 0) else [],
+            "enforcedOn": [],
+        })
+
     return {
         "path_calc_results": {
             "traffic_allowed": not blocked,
-            "device_info": [
-                {
-                    "id": 7349, "name": "RTR-EXAMPLE-02", "type": "router",
-                    "vendor": "Cisco",
-                    "incomingInterfaces": [
-                        {"name": "Loopback99", "ip": f"{src}/32",
-                         "incomingVrf": "EXAMPLE-VRF-A"},
-                    ],
-                    "nextDevices": [
-                        {"name": "SW-EXAMPLE-B1", "routes": [
-                            {"routeDestination": "0.0.0.0/0",
-                             "nextHopIp": "203.0.113.45",
-                             "outgoingInterfaceName": "TenGigE0/0/0/0",
-                             "mplsOutputLabel": "27084"},
-                        ]},
-                        {"name": "RTR-EXAMPLE-01", "routes": []},
-                    ],
-                    "rules": [rule],
-                    "enforcedOn": [],
-                },
-                {
-                    "id": 7412, "name": "FW-DC1-EDGE-01", "type": "firewall",
-                    "vendor": "Checkpoint",
-                    "incomingInterfaces": [
-                        {"name": "eth1", "ip": "10.10.255.1/24",
-                         "incomingVrf": None},
-                    ],
-                    "nextDevices": [],
-                    "rules": [rule] if blocked else [],
-                    "enforcedOn": [],
-                },
-            ],
+            "device_info": devices,
         },
         "unrouted_elements": ([{"destination": dst, "source": [src]}]
                               if blocked else []),

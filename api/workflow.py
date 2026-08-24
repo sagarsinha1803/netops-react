@@ -187,6 +187,9 @@ class Workflow:
         self.report = None        # final answer, for the Report tab
         self.deep_report = None   # the deeper-checks answer, appended below it
         self.path = {"nodes": [], "line": "", "reached": None}
+        # every instrument that has an opinion about the route, keyed by
+        # which one it was: they disagree, and the disagreement is the find
+        self.paths = {}
         self._basic_seen = set()
         self._kind = {}           # command -> "ping" | "trace" | "deep"
 
@@ -199,10 +202,25 @@ class Workflow:
             for k, label in STEP_DEFS
             if k not in HIDDEN_STEPS and (keep is None or k in keep)
         ]
+        # The traceroute names the two ends; the other instruments were asked
+        # by address and would otherwise label the same device three different
+        # ways in three drawings of one route.
+        paths = {}
+        for kind, path in self.paths.items():
+            nodes = [dict(n) for n in (path.get("nodes") or [])]
+            if kind != "traceroute" and nodes:
+                if nodes[0].get("kind") == "source":
+                    nodes[0]["label"] = self.path_source()
+                if nodes[-1].get("kind") == "dest":
+                    nodes[-1]["label"] = self.path_dest()
+                path = dict(path, nodes=nodes, line=_line(nodes))
+            paths[kind] = path
+
         return {"title": self.title, "steps": steps, "params": self.params,
                 "checks": self.checks, "basics": self.basics,
                 "summary": self.summary, "report": self.report,
                 "deepReport": self.deep_report, "path": self.path,
+                "paths": paths,
                 "local": self.local, "cmdbMiss": self.cmdb_miss,
                 "alerts": self.alerts, "maxDeep": C.DEEP_MAX_LOOPS}
 
@@ -214,6 +232,7 @@ class Workflow:
         self.local = False
         self.cmdb_miss = False
         self.path = {"nodes": [], "line": "", "reached": None}
+        self.paths = {}
         self.basics = []
         self.checks = []
         self.alerts = []
@@ -323,10 +342,13 @@ class Workflow:
         nodes = [{"label": src_label, "ip": None, "kind": "source"}]
         died = False
         for h in hops:
-            if h.get("timeout"):
+            label = str(h.get("host") or h.get("ip") or f"hop {h.get('n')}")
+            # A hop nobody answered is where the trace ends, however the parser
+            # labelled it. Rendering "* * *" as a node -- twice, once per
+            # unanswered ttl -- draws silence as if it were equipment.
+            if h.get("timeout") or set(label) <= {"*", " "}:
                 died = True
                 break
-            label = str(h.get("host") or h.get("ip") or f"hop {h.get('n')}")
             if label == dst_label:
                 continue          # the destination answering IS the dest node
             ip = h.get("ip")
@@ -345,11 +367,50 @@ class Workflow:
         return {"nodes": nodes, "line": line, "reached": reached,
                 "truncated": died and not reached}
 
+    def path_source(self):
+        """The label the paths should call the source.
+
+        Taken from the traceroute's own first node when there is one, so three
+        drawings of the same route do not name its ends three different ways.
+        """
+        nodes = (self.path or {}).get("nodes") or []
+        if nodes:
+            return nodes[0].get("label") or "source"
+        return str((self.params or {}).get("source") or "source")
+
+    def _cmdb_labels(self):
+        """The hostnames the CMDB returned, in lookup order: source, then dest."""
+        return [str(row.get("device")) for row in self.basics
+                if row.get("kind") == "cmdb" and row.get("device")]
+
+    def path_dest(self):
+        nodes = (self.path or {}).get("nodes") or []
+        if nodes and nodes[-1].get("kind") == "dest":
+            return nodes[-1].get("label") or "destination"
+        # a trace that never arrived has no destination node, but the CMDB
+        # still knows what the far end is called -- and an address where every
+        # other node is a hostname reads as a different kind of thing
+        labels = self._cmdb_labels()
+        if len(labels) > 1:
+            return labels[1]
+        return str((self.params or {}).get("dest") or "destination")
+
+    def set_path(self, kind, path):
+        """Record one instrument's view of the route."""
+        if path:
+            self.paths[kind] = path
+
     def from_state(self, state):
         """Sync the timeline with what the graph has actually established."""
         path = self._path_from_state(state)
         if path:
             self.path = path
+            self.paths["traceroute"] = dict(
+                path, note=path.get("note") or
+                ("Live from the source: every hop that answered a probe."
+                 if path.get("reached") else
+                 "Live from the source. It stops where the probes stopped "
+                 "coming back, which is not always where the fault is."))
         self.summary = {"ping_ok": state.get("ping_ok"),
                         "path": state.get("path") or "",
                         "hops": len(state.get("hops") or []),
@@ -617,3 +678,124 @@ def _first_denying_rule(node, depth: int = 0) -> str:
             if found:
                 return found
     return ""
+
+
+# ---------------------------------------------------------------- paths -----
+# Three different instruments answer "where does the traffic go", and they
+# answer differently on purpose:
+#
+#   traceroute  what the packets DID, live, one probe at a time
+#   Tufin       what the topology and the policy SAY should happen
+#   deep checks what the source's own forwarding table intends to do next
+#
+# Showing only the traceroute hides the disagreement, and the disagreement is
+# usually the finding: a trace that dies where Tufin says the path is clear is
+# a different problem from one that dies where a rule blocks it.
+
+def _line(nodes) -> str:
+    return "  \u2192  ".join(
+        n["label"] + (f" ({n['ip']})" if n.get("ip") else "") for n in nodes)
+
+
+def path_from_policy(body, src_label="source", dst_label="destination"):
+    """The device chain SecureTrack modelled, as a path."""
+    import ast
+    data = None
+    for loader in (json.loads, ast.literal_eval):
+        try:
+            got = loader(str(body or ""))
+            if isinstance(got, dict):
+                data = got
+                break
+        except Exception:
+            continue
+    if not isinstance(data, dict):
+        return None
+
+    hops = data.get("hops")
+    if not hops:
+        flat = data.get("device_path") or []
+        hops = [[name] for name in flat if name]
+    if not hops:
+        return None
+
+    reached = data.get("reaches_destination")
+    if reached is None:
+        reached = not (data.get("unrouted_elements")
+                       or (data.get("path_calc_results") or {})
+                       .get("unrouted_elements"))
+
+    nodes = [{"label": src_label, "ip": None, "kind": "source"}]
+    for step in hops:
+        names = [str(n) for n in (step if isinstance(step, list) else [step]) if n]
+        if not names:
+            continue
+        # two devices in one step are ALTERNATIVES, not a sequence: equal-cost
+        # next hops that rejoin. Sequencing them invents a route through both.
+        nodes.append({"label": " / ".join(names), "ip": None, "kind": "hop"})
+    nodes.append({"label": dst_label if reached else "X", "ip": None,
+                  "kind": "dest" if reached else "dead"})
+
+    note = str(data.get("path_note") or "")
+    if not note:
+        note = ("Modelled by SecureTrack from the topology and the rules -- "
+                "not a live probe." if reached else
+                "SecureTrack has no route for this pair: the traffic is not "
+                "delivered anywhere.")
+    return {"nodes": nodes, "line": _line(nodes), "reached": bool(reached),
+            "note": note}
+
+
+# what a route/CEF entry says it will do next: "via 10.0.0.1, TenGigE0/0/0/3"
+_VIA = re.compile(r"via\s+(\d{1,3}(?:\.\d{1,3}){3})(?:\s*,\s*([A-Za-z][\w./:-]*))?",
+                  re.I)
+_ARP_INCOMPLETE = re.compile(r"incomplete", re.I)
+_IF_DOWN = re.compile(r"^(\S+)\s+is\s+(?:administratively\s+)?down", re.I | re.M)
+
+
+def path_from_checks(checks, src_label="source", dst_label="destination"):
+    """What the deeper checks established about the next hop.
+
+    Not a traceroute: it is the source's own answer to "and then what?", which
+    is the question a trace full of stars leaves open. A next hop that never
+    resolved in ARP, or an egress interface that is down, ends the path HERE --
+    and says why, which no traceroute can.
+    """
+    text = "\n".join(str(c.get("output") or "") for c in (checks or []))
+    if not text.strip():
+        return None
+
+    via = _VIA.search(text)
+    if not via:
+        return None
+    next_hop, egress = via.group(1), via.group(2) or ""
+
+    unresolved = bool(_ARP_INCOMPLETE.search(text))
+    down = [m.group(1) for m in _IF_DOWN.finditer(text)]
+    broken = egress and any(egress.lower() in d.lower() or d.lower() in egress.lower()
+                            for d in down)
+
+    hop = {"label": next_hop, "ip": None, "kind": "hop"}
+    if egress:
+        hop["via"] = egress
+    nodes = [{"label": src_label, "ip": None, "kind": "source"}, hop]
+
+    if unresolved or broken:
+        nodes.append({"label": "X", "ip": None, "kind": "dead"})
+        why = []
+        if broken:
+            why.append(f"{egress} is down")
+        if unresolved:
+            why.append(f"{next_hop} never answered ARP")
+        note = ("The source forwards toward " + next_hop
+                + (f" out {egress}" if egress else "")
+                + ", but " + " and ".join(why)
+                + " -- so nothing leaves here, whatever the policy allows.")
+    else:
+        nodes.append({"label": dst_label, "ip": None, "kind": "dest"})
+        note = ("The source's forwarding entry for the destination is complete: "
+                "next hop " + next_hop + (f" out {egress}" if egress else "")
+                + ", resolved and up.")
+
+    return {"nodes": nodes, "line": _line(nodes),
+            "reached": not (unresolved or broken), "note": note}

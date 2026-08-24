@@ -223,6 +223,33 @@ check("2: every deep command was answered by the SOURCE, not another device",
       "a healthy device's routing table leaked into the broken scenario")
 check("2: the deep report reached the panel", bool(wf.get("deepReport")))
 
+# ---- three instruments, three drawings of the same route -----------------
+paths = wf.get("paths") or {}
+print("\n  paths drawn:")
+for kind in ("traceroute", "tufin", "deep"):
+    p = paths.get(kind)
+    print(f"     {kind:11s} {(p or {}).get('line', '(none)')[:70]}")
+    if p and p.get("note"):
+        print(f"     {'':11s} {p['note'][:88]}")
+
+check("2: the traceroute path is drawn", bool(paths.get("traceroute")))
+check("2: the Tufin path is drawn beside it", bool(paths.get("tufin")),
+      str(sorted(paths)))
+check("2: and the deeper checks add their own",
+      bool(paths.get("deep")), str(sorted(paths)))
+check("2: the traceroute stops at the silence, without drawing it as a device",
+      "*" not in (paths.get("traceroute") or {}).get("line", ""),
+      (paths.get("traceroute") or {}).get("line", ""))
+check("2: Tufin says the traffic is delivered -- it disagrees with the trace",
+      (paths.get("tufin") or {}).get("reached") is True,
+      str((paths.get("tufin") or {}).get("line"))[:60])
+check("2: the deep path names the next hop the source is trying",
+      "10.20.30.129" in (paths.get("deep") or {}).get("line", ""),
+      (paths.get("deep") or {}).get("line", ""))
+check("2: and says why nothing leaves",
+      "TenGigE0/0/0/3 is down" in (paths.get("deep") or {}).get("note", ""),
+      (paths.get("deep") or {}).get("note", "")[:90])
+
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")
 sys.exit(1 if fails else 0)

@@ -383,3 +383,21 @@ table.alerts td {
 table.alerts tr:last-child td { border-bottom: none; }
 table.alerts tbody tr:hover { background: var(--bg-inset); }
 table.alerts td.mono { font-family: ui-monospace, Consolas, monospace; }
+
+/* ---- Path tab: one drawing per instrument ------------------------------- */
+.pathviews { display: flex; flex-direction: column; gap: 18px; }
+.pathview + .pathview {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.pathview .ph {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;
+}
+.pathview .pt {
+  font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.pathview .pt.ok { color: var(--green); }
+.pathview .pt.bad { color: var(--red); }
+.pathview .ps { font-size: 12px; color: var(--dim); }
+.pathview .pn { margin-top: 8px; }

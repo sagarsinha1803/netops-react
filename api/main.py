@@ -50,7 +50,9 @@ from agent.utils import display_command           # noqa: E402
 
 from api.workflow import (Workflow, as_report, check_ok,      # noqa: E402
                           cmdb_record, device_label, failed_line,
-                          parse_alerts, parse_request, policy_verdict,
+                          parse_alerts, parse_request,
+                          path_from_checks, path_from_policy,
+                          policy_verdict,
                           usable_output)
 
 CLIP = C.LLM_MODE == "clipboard"
@@ -211,6 +213,12 @@ async def drive(sess: Session, app_graph, config, first_input,
                                else "failed" if verdict == "BLOCKED" else "skipped",
                                (f"Traffic {verdict.lower()}"
                                 + (f" by {acl}" if acl else "")))
+                        # SecureTrack modelled a device chain of its own. It is
+                        # a different answer from the traceroute -- what SHOULD
+                        # happen, against what did -- and worth drawing beside
+                        # it rather than instead of it.
+                        wf.set_path("tufin", path_from_policy(
+                            body, wf.path_source(), wf.path_dest()))
                     elif wf.basics[basic_idx[tid]].get("kind") == "alerts":
                         rows, message = parse_alerts(body)
                         # a device with no open alerts is a good answer, not a
@@ -396,6 +404,10 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         # a question's answer belongs in the chat, not in the run's report
         if show_commands:
             wf.deep_report = parsed
+            # the deeper checks answer the question a trace full of stars
+            # leaves open: where does the source think this goes next
+            wf.set_path("deep", path_from_checks(
+                wf.checks, wf.path_source(), wf.path_dest()))
         else:
             wf.report = parsed
     await sess.push_wf()

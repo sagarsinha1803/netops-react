@@ -270,6 +270,54 @@ function PathChips({ path }) {
   );
 }
 
+// Three instruments answer "where does the traffic go", and they answer
+// differently on purpose: the traceroute says what the packets DID, Tufin says
+// what the topology and the rules SAY should happen, and the deeper checks say
+// what the source's own forwarding table intends to do next. Drawing only the
+// traceroute hides the disagreement between them -- and the disagreement is
+// usually the finding.
+const PATH_VIEWS = [
+  { key: "traceroute", label: "Traceroute", sub: "live, from the source" },
+  { key: "tufin", label: "Firewall policy", sub: "modelled by SecureTrack" },
+  { key: "deep", label: "Deeper checks", sub: "the source's own forwarding" },
+];
+
+function PathViews({ paths, fallback, verdictClass }) {
+  const have = PATH_VIEWS.filter((v) => paths && paths[v.key] &&
+                                 (paths[v.key].nodes || []).length);
+  if (!have.length) {
+    return (
+      <>
+        <PathChips path={fallback} />
+        <div className="hint" style={{ marginTop: 8 }}>
+          {verdictClass === "ok"
+            ? "Every hop answered through to the destination."
+            : "The chain stops where traffic no longer gets through."}
+        </div>
+      </>
+    );
+  }
+  return (
+    <div className="pathviews">
+      {have.map((v) => {
+        const p = paths[v.key];
+        const labels = (p.nodes || []).map((n) =>
+          n.label + (n.ip ? ` (${n.ip})` : "") + (n.via ? ` via ${n.via}` : ""));
+        return (
+          <div className="pathview" key={v.key}>
+            <div className="ph">
+              <span className={`pt ${p.reached ? "ok" : "bad"}`}>{v.label}</span>
+              <span className="ps">{v.sub}</span>
+            </div>
+            <PathChips path={labels} />
+            {p.note && <div className="hint pn">{p.note}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // The report's detail, minus the path (which has its own tab). Used for both
 // the primary report and the deeper-checks report.
 function ReportBody({ report, answer }) {
@@ -378,7 +426,7 @@ function AlertsTable({ alerts }) {
   );
 }
 
-function Report({ final, busy, deepRunning, cmdbMiss, alerts, onDeep }) {
+function Report({ final, busy, deepRunning, cmdbMiss, alerts, paths, onDeep }) {
   const rep = final.report || {};
   const verdict = rep.result || (rep.text || final.answer ? "ANSWER" : "?");
   const cls = verdictClass(rep.result);
@@ -437,14 +485,7 @@ function Report({ final, busy, deepRunning, cmdbMiss, alerts, onDeep }) {
           <ReportBody report={final.report} answer={final.answer} />
         )}
         {tab === "path" && (
-          <>
-            <PathChips path={effPath} />
-            <div className="hint" style={{ marginTop: 8 }}>
-              {cls === "ok"
-                ? "Every hop answered through to the destination."
-                : "The chain stops where traffic no longer gets through."}
-            </div>
-          </>
+          <PathViews paths={paths} fallback={effPath} verdictClass={cls} />
         )}
         {tab === "alerts" && <AlertsTable alerts={alerts} />}
         {tab === "deep" && (
@@ -528,7 +569,8 @@ export default function Console({
         {final && (
           <Report final={final} busy={busy} deepRunning={deepRunning}
                   cmdbMiss={!!(wf && wf.cmdbMiss)}
-                  alerts={(wf && wf.alerts) || []} onDeep={onDeep} />
+                  alerts={(wf && wf.alerts) || []}
+                  paths={(wf && wf.paths) || {}} onDeep={onDeep} />
         )}
       </div>
     </div>
