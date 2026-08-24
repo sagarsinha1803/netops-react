@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent import constants as C            # noqa: E402
 from agent import prompts                   # noqa: E402
 from agent.guards import check_command      # noqa: E402
+from agent.salvage import salvage_tool_call  # noqa: E402
 from agent.state import NetState            # noqa: E402
 from agent.utils import (commands_of, display_command,  # noqa: E402
                          tool_text)
@@ -159,6 +160,23 @@ async def build_agent(checkpointer=None):
         if not any(getattr(m, "type", "") == "system" for m in msgs):
             msgs = [("system", SYSTEM_PROMPT + unavailable)] + list(msgs)
         reply = await llm_with_tools.ainvoke(msgs)
+
+        # A model that writes its tool call out as prose instead of calling
+        # ends the run on step one: no tool calls means "this is the answer",
+        # so every stage stays grey and the Conclusion goes green over
+        # nothing. Read the call out of the text instead. It still passes
+        # through the allowlist and the human gate like any other.
+        if not getattr(reply, "tool_calls", None):
+            rescued = salvage_tool_call(str(reply.content or ""), by_name)
+            if rescued:
+                name, args = rescued
+                print(f"[LLM] tool call written as text, not called: {name} "
+                      f"-- salvaged", file=sys.stderr)
+                reply = AIMessage(
+                    content=str(reply.content or ""),
+                    tool_calls=[{"name": name, "args": args,
+                                 "id": f"salvaged_{state.get('loops') or 0}"}])
+
         out: dict = {"messages": [reply]}
         if not getattr(reply, "tool_calls", None) and reply.content:
             out["answer"] = str(reply.content)
