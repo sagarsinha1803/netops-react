@@ -4,33 +4,19 @@
 # the UUID-ish alert_id and numeric ticket_id the real table carries.
 from typing import Annotated, Optional
 
+import os
+import sys
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import scenarios as S  # noqa: E402
+
 mcp = FastMCP("archangel-server")
 
-_ALERTS = {
-    "APP-SRV-DC1-020": [
-        {"alert_id": "9a7fc3aa-0000-1111-2222-333333333333",
-         "device_name": "APP-SRV-DC1-020", "alert_type": "network",
-         "alert_title": "LinkStatusOperDown",
-         "check_name": "Interface Bundle-Ether90", "ticket_id": "560000001"},
-        {"alert_id": "9a7ff104-0000-1111-2222-333333333333",
-         "device_name": "APP-SRV-DC1-020", "alert_type": "network",
-         "alert_title": "LinkStatusOperDown",
-         "check_name": "Interface TenGigE0/0/0/14", "ticket_id": "560000001"},
-        {"alert_id": "fc23e54e-0000-1111-2222-333333333333",
-         "device_name": "APP-SRV-DC1-020", "alert_type": "network",
-         "alert_title": "InterfaceAlert",
-         "check_name": "Interface Bundle-Ether20.3003", "ticket_id": "560000002"},
-    ],
-    "PAY-API-DC2-010": [
-        {"alert_id": "a2f5d3a6-0000-1111-2222-333333333333",
-         "device_name": "PAY-API-DC2-010", "alert_type": "network",
-         "alert_title": "InterfaceAlert",
-         "check_name": "Interface TenGigE0/0/0/5", "ticket_id": "560000003"},
-    ],
-}
+_ALERTS = S.ALERTS
 
 
 @mcp.tool(

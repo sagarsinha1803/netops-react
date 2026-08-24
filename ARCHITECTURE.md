@@ -344,11 +344,10 @@ netops-react/
 .\run.ps1 -Dev             # + Vite dev server with hot reload
 ```
 
-Offline demo with no Copilot and no devices:
+Demo on mock systems with the real model — see [DEMO.md](DEMO.md):
 
 ```powershell
-.venv\Scripts\python.exe tests\fake_llm.py 11499
-$env:LLM_MODE="api"; $env:LLM_BASE_URL="http://127.0.0.1:11499/v1"; .\run.ps1 -Mock
+$env:LLM_MODE="api"; $env:LLM_BASE_URL="http://localhost:11434/v1"; .\run.ps1 -Mock
 ```
 
 Tests are plain scripts — exit 0 means pass:

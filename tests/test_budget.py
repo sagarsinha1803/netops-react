@@ -5,22 +5,18 @@ that simply stopped, which an engineer cannot tell apart from a crash.
 """
 import asyncio
 import os
-import subprocess
 import sys
-import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "tests"))
 os.chdir(ROOT)
 os.environ["USE_MOCKS"] = "1"
-os.environ["LLM_BASE_URL"] = "http://127.0.0.1:11502/v1"
-os.environ["LLM_MODEL"] = "gpt-4o"
-os.environ["LLM_API_KEY"] = "EMPTY"
 os.environ["REQUIRE_APPROVAL"] = "0"          # the gate is tested elsewhere
 
-llm = subprocess.Popen([sys.executable, "tests/fake_llm.py", "11502"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-time.sleep(1.5)
+from agent import constants as C                                # noqa: E402
+from agent import graph as G                                    # noqa: E402
+from scripted_model import ScriptedModel, ssh                   # noqa: E402
 
 fails = []
 
@@ -31,13 +27,20 @@ def check(name, cond, detail=""):
         fails.append(name)
 
 
+SRC, DST = "10.10.1.20", "172.20.5.10"
+
+# a model that would keep going forever if the graph let it
+G.llm = ScriptedModel(
+    script=[("get_device_details", {"device_name": SRC})] * 20,
+    thoughts=["Looking it up again."] * 20,
+    final="never reached")
+
+
 async def main():
-    from agent import constants as C
     C.MAX_TOOL_LOOPS = 2                       # spend it almost immediately
-    from agent.graph import build_agent
-    app = await build_agent()
+    app = await G.build_agent()
     state = await app.ainvoke(
-        {"messages": [("user", "Troubleshoot 10.10.1.20 to 172.20.5.10 on tcp:443")],
+        {"messages": [("user", f"Troubleshoot {SRC} to {DST} on tcp:443")],
          "loops": 0},
         {"configurable": {"thread_id": "budget-1"}})
 
@@ -50,12 +53,11 @@ async def main():
     check("the last message is not a bare tool call",
           not getattr(last, "tool_calls", None),
           str(getattr(last, "tool_calls", None))[:60])
-    check("it does not claim a verdict it never reached",
-          "not reachable" not in answer.lower() or "inconclusive" in answer.lower()
-          or "budget" in answer.lower(), answer[:80])
+    check("the loop really was cut short, not run to completion",
+          (state.get("loops") or 0) <= 3, str(state.get("loops")))
+
 
 asyncio.run(main())
-llm.terminate()
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")
 sys.exit(1 if fails else 0)

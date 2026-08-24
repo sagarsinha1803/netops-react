@@ -120,8 +120,8 @@ IP/name masking for the clipboard relay.
 
 ## Checking the whole flow
 
-Four levels, cheapest first. The first three need no credentials, no devices
-and no Copilot.
+Five levels, cheapest first. The first two need no credentials, no devices
+and no model at all.
 
 **1. One command, everything mocked.** Starts the scripted model, opens the
 app's own `/ws` socket, sends what the browser sends, approves each command
@@ -136,14 +136,19 @@ Takes about a minute — the mock MCP servers are real subprocesses. This is the
 one that catches breaks BETWEEN the pieces; the unit tests each mock the thing
 next to them, which is how one real defect passed all of them.
 
-**2. The same run, in the browser.** Two terminals:
+**2. Both demo scenarios, end to end**, including the deeper checks:
 
 ```powershell
-.venv\Scripts\python.exe tests\fake_llm.py 11499
+.venv\Scripts\python.exe tests\test_demo_scenarios.py
 ```
 
+See [DEMO.md](DEMO.md) for what they show and what to say while they run.
+
+**3. In the browser**, with the model you actually use — the VS Code Copilot
+bridge, or the clipboard relay:
+
 ```powershell
-$env:LLM_MODE="api"; $env:LLM_BASE_URL="http://127.0.0.1:11499/v1"; .\run.ps1 -Mock
+$env:LLM_MODE="api"; $env:LLM_BASE_URL="http://localhost:11434/v1"; .\run.ps1 -Mock
 ```
 
 Ask for `10.10.1.20` to `172.20.5.10` on `tcp:443`. Expect: CMDB green, ping
@@ -151,7 +156,7 @@ red (it is meant to fail), traceroute green, Tufin red with DENY-ALL, Alerts
 green reading `4 alert(s), 3 ticket(s)`, and four rows in the Alerts tab across
 two devices. The Path tab ends in `X` at the firewall.
 
-**3. Each back end on its own**, once credentials.yml is filled in — this
+**4. Each back end on its own**, once credentials.yml is filled in — this
 separates "the database or API is wrong" from "the agent is wrong":
 
 ```powershell
@@ -162,7 +167,7 @@ It prints the URL with the password blanked, then the rows or the reason there
 are none. `No open alerts found` is a good answer; `Error querying Archangel`
 is a connection, driver or permission problem, and the exception says which.
 
-**4. The real run.** `.\run.ps1`, credentials in place, model configured, two
+**5. The real run.** `.\run.ps1`, credentials in place, model configured, two
 devices the CMDB knows. Watch that the alert lookup uses the NAME the CMDB
 returned: if the alerts stage is skipped, the CMDB record is what is missing,
 not the alert database.
@@ -179,6 +184,7 @@ not the alert database.
 .venv\Scripts\python.exe tests\test_alerts.py         # Archangel rows -> the table
 .venv\Scripts\python.exe tests\test_alert_backstop.py # a model that skips step 5
 .venv\Scripts\python.exe tests\test_budget.py         # a run that spends its budget
+.venv\Scripts\python.exe tests\test_demo_scenarios.py # both demo scenarios + deep checks
 .venv\Scripts\python.exe tests\test_api_mask.py       # masking through an API model
 .venv\Scripts\python.exe tests\test_local_probe.py    # the optional local probes
 .venv\Scripts\python.exe tests\test_ip_mask.py

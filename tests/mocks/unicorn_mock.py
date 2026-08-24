@@ -22,6 +22,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
 
 from unicorn_mcp import _slim  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scenarios as S  # noqa: E402
+
 mcp = FastMCP("unicorn-server")
 
 def _raw(name, ip, brand, model, os_name, os_version):
@@ -75,19 +78,12 @@ def _raw(name, ip, brand, model, os_name, os_version):
     }
 
 
-_RAW = {
-    "APP-SRV-DC1-020": _raw("APP-SRV-DC1-020", "10.10.1.20", "Cisco",
-                            "ASR 9010", "IOS XE", "17.9.3"),
-    "PAY-API-DC2-010": _raw("PAY-API-DC2-010", "172.20.5.10", "Cisco",
-                            "N9K-C93180", "NX-OS", "10.2"),
-    "LEAF-101": _raw("Leaf-101", "10.10.1.1", "Cisco", "N9K-C93108",
-                     "NX-OS", "10.2"),
-    "BORDER-ROUTER-01": _raw("Border-Router-01", "10.10.0.1", "Cisco",
-                             "ASR 9906", "IOS XR", "7.11.2"),
-    "FW-DC1-EDGE-01": _raw("FW-DC1-EDGE-01", "10.10.255.1", "Checkpoint",
-                           "CP-6800", "Gaia", "R81.20"),
-}
-_REGION = {name: "INDIA" for name in _RAW}
+# built from the shared scenario file, so the CMDB agrees with the device that
+# answers the commands and with the alerts raised against it
+_RAW = {name: _raw(name, d["ip"], d["brand"], d["model"], d["os"], d["version"])
+        for name, d in S.DEVICES.items()}
+
+_REGION = {name: d["region"] for name, d in S.DEVICES.items()}
 # keyed on the ssh entry, which is what the agent connects over
 _BY_IP = {d["remoteManagement"][1]["ip"]: key for key, d in _RAW.items()}
 

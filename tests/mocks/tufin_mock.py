@@ -19,9 +19,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(
 
 from mcp_tools.tufin_mcp import summarise  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scenarios as S  # noqa: E402
+
 mcp = FastMCP("tufin-server")
 
-_BLOCKED_DESTS = {"172.20.5.10", "203.0.113.245"}
+_BLOCKED_DESTS = S.BLOCKED_DESTS
 
 
 def _payload(src: str, dst: str, service: str, blocked: bool) -> dict:
@@ -31,7 +34,8 @@ def _payload(src: str, dst: str, service: str, blocked: bool) -> dict:
         "services": ["Any"], "serviceNegated": False,
         "applications": [], "users": [],
         "action": "Drop" if blocked else "Accept",
-        "aclName": "DENY-ALL" if blocked else "PERMIT-INTRA-DC",
+        "aclName": ("DENY-ALL" if blocked else
+                    S.POLICY_RULES.get(dst, "PERMIT-INTRA-DC")),
         "name": "",
     }
     return {
