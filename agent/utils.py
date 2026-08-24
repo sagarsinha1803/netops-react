@@ -95,3 +95,34 @@ def display_command(name: str, args: dict) -> str:
     # it never identifies -- and the honest answer to that is always "reject".
     inner = ", ".join(f"{k}={v}" for k, v in args.items()) if args else ""
     return f"{name}({inner})"
+
+
+def describe_call(name: str, args: dict) -> str:
+    """A plain description of a step, for when the model attached no words.
+
+    Most models answer a tool call with tool_calls and NOTHING else -- content
+    is empty, because everything they had to say is in the arguments. The
+    activity feed then has nothing to show under "show reasoning", so a run
+    that explains itself perfectly well in the transcript looks silent.
+
+    This is a DESCRIPTION, not reasoning, and the panel labels it as such: it
+    says what the step is, never why it was chosen, because only the model
+    knows that and this one did not say.
+    """
+    args = args or {}
+    who = args.get("device_name") or args.get("device_ip") or args.get("source")
+    if name == "get_device_details":
+        return f"CMDB lookup for {who}." if who else "CMDB lookup."
+    if name == "get_firewall_path":
+        service = args.get("service") or "any"
+        return (f"Policy check with Tufin: {args.get('src', '?')} to "
+                f"{args.get('dst', '?')} on {service}.")
+    if name.startswith("get_alert"):
+        return f"Open alerts for {who}." if who else "Open alerts."
+    if name.startswith("local_"):
+        dest = args.get("dest") or args.get("destination") or "?"
+        return f"Probe to {dest} from the agent host, not from the source."
+    cmds = commands_of(args)
+    if cmds:
+        return f"Read-only command on {who or 'the device'}: {'; '.join(cmds)}"
+    return f"{name} on {who}." if who else f"{name}."

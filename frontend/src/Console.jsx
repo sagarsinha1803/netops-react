@@ -119,7 +119,15 @@ function FeedRow({ row, showWhy }) {
       </div>
       {open && (
         <div className="expand">
-          {showWhy && row.thought && <div className="why">{row.thought}</div>}
+          {showWhy && row.thought && (
+            <div className={`why${row.saidIt ? "" : " step"}`}>
+              {/* the model's own words, or -- when it attached none to its
+                  tool call -- our description of the step. Labelled, because
+                  the feed is evidence and must not put words in its mouth. */}
+              {!row.saidIt && <span className="tag">step</span>}
+              {row.thought}
+            </div>
+          )}
           {row.output && <pre className="mono">{row.output}</pre>}
         </div>
       )}
@@ -159,10 +167,13 @@ function Feed({ wf, showWhy, onToggleWhy, waiting }) {
           <React.Fragment key={`b${i}`}>
             <FeedRow row={r} showWhy={showWhy} />
             {showWhy && r.thought && (
-              <div className="row thought">
+              <div className={`row thought${r.saidIt ? "" : " step"}`}>
                 <div className="line">
                   <div style={{ width: 16 }} />
-                  <div className="cmd">{r.thought}</div>
+                  <div className="cmd">
+                    {!r.saidIt && <span className="tag">step</span>}
+                    {r.thought}
+                  </div>
                 </div>
               </div>
             )}
@@ -179,10 +190,13 @@ function Feed({ wf, showWhy, onToggleWhy, waiting }) {
           <React.Fragment key={`c${i}`}>
             <FeedRow row={r} showWhy={showWhy} />
             {showWhy && r.thought && (
-              <div className="row thought">
+              <div className={`row thought${r.saidIt ? "" : " step"}`}>
                 <div className="line">
                   <div style={{ width: 16 }} />
-                  <div className="cmd">{r.thought}</div>
+                  <div className="cmd">
+                    {!r.saidIt && <span className="tag">step</span>}
+                    {r.thought}
+                  </div>
                 </div>
               </div>
             )}

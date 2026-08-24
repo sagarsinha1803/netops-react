@@ -401,3 +401,12 @@ table.alerts td.mono { font-family: ui-monospace, Consolas, monospace; }
 .pathview .pt.bad { color: var(--red); }
 .pathview .ps { font-size: 12px; color: var(--dim); }
 .pathview .pn { margin-top: 8px; }
+
+/* a line the panel wrote itself, because the model attached none */
+.row.thought.step .cmd, .why.step { color: var(--dim); }
+.why .tag, .row.thought .tag {
+  display: inline-block; margin-right: 8px; padding: 1px 6px;
+  border: 1px solid var(--border); border-radius: 4px;
+  font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--dim); vertical-align: 1px;
+}

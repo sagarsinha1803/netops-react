@@ -46,7 +46,7 @@ from agent.constants import (ALERT_TOOL_NAMES,    # noqa: E402
                              DEVICE_TOOL_NAMES, POLICY_TOOL_NAMES)
 from agent.llm import ip_mask                     # noqa: E402
 from agent.prompts import DEEP_CHECK_PROMPT       # noqa: E402
-from agent.utils import display_command           # noqa: E402
+from agent.utils import describe_call, display_command           # noqa: E402
 
 from api.workflow import (Workflow, as_report, check_ok,      # noqa: E402
                           cmdb_record, device_label, failed_line,
@@ -151,6 +151,12 @@ async def drive(sess: Session, app_graph, config, first_input,
                 for tc in m.tool_calls:
                     args = tc.get("args") or {}
                     issued[tc.get("id")] = (tc["name"], args)
+                    # Most models say nothing alongside a tool call: everything
+                    # they had to say is in the arguments. Describe the step
+                    # ourselves rather than leave the feed blank -- flagged, so
+                    # the panel never presents our words as the model's.
+                    said = bool(thought)
+                    why = thought or describe_call(tc["name"], args)
                     if tc["name"] not in DEVICE_TOOL_NAMES:
                         if not show_commands:
                             cmd = display_command(tc["name"], args)
@@ -165,7 +171,7 @@ async def drive(sess: Session, app_graph, config, first_input,
                                 if alerts else
                                 f"{tc['name']}({args.get('device_name') or ''})")
                             basic_idx[tc.get("id")] = wf.add_basic(
-                                label, thought=thought,
+                                label, thought=why, said=said,
                                 kind="policy" if policy else
                                      "alerts" if alerts else "cmdb")
                         continue
@@ -176,11 +182,13 @@ async def drive(sess: Session, app_graph, config, first_input,
                     kind = wf.classify(cmd, show_commands)
                     if kind == "deep":
                         check_idx[tc.get("id")] = wf.add_check(
-                            cmd, where, args.get("region"), thought)
+                            cmd, where, args.get("region"), why,
+                            said=said)
                     else:
                         wf.from_tool_call(tc["name"], args, cmd)
                         basic_idx[tc.get("id")] = wf.add_basic(
-                            cmd, where, args.get("region"), thought, kind)
+                            cmd, where, args.get("region"), why, kind,
+                            said=said)
                 await sess.push_wf()
             elif isinstance(m, ToolMessage):
                 body = str(m.content)
@@ -467,7 +475,10 @@ async def fill_alerts(sess, wf):
 
     failed_any = False
     for name in names:
-        idx = wf.add_basic(f"alerts({name})", thought="", kind="alerts")
+        idx = wf.add_basic(
+            f"alerts({name})", kind="alerts", said=False,
+            thought=("Run by the workflow, not by the model: it concluded "
+                     "without asking, and the CMDB found this device."))
         await sess.push_wf()
         try:
             body = str(await tool.ainvoke({"device_name": name}))

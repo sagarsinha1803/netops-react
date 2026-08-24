@@ -294,9 +294,10 @@ class Workflow:
             self.local = True
         self.set(self.stage_for(command_text, name), "running", command_text[:60])
 
-    def add_check(self, command, device, region=None, thought=""):
+    def add_check(self, command, device, region=None, thought="", said=True):
         self.checks.append({"cmd": command, "device": device, "region": region,
                             "status": "running", "detail": "", "thought": thought,
+                            "saidIt": bool(said and thought),
                             "output": "", "step": len(self.checks) + 1})
         return len(self.checks) - 1
 
@@ -307,9 +308,14 @@ class Workflow:
             if output:
                 self.checks[idx]["output"] = output[:2000]
 
-    def add_basic(self, command, device=None, region=None, thought="", kind="cmdb"):
+    def add_basic(self, command, device=None, region=None, thought="",
+                  kind="cmdb", said=True):
+        # `said` is False when the model attached no words and the line under
+        # the row is our own description of the step. The panel is evidence:
+        # it must not put words in the model's mouth.
         self.basics.append({"cmd": command, "device": device, "region": region,
                             "status": "running", "detail": "", "thought": thought,
+                            "saidIt": bool(said and thought),
                             "output": "", "kind": kind,
                             "step": len(self.basics) + 1})
         return len(self.basics) - 1
