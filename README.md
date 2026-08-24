@@ -185,6 +185,8 @@ not the alert database.
 .venv\Scripts\python.exe tests\test_alert_backstop.py # a model that skips step 5
 .venv\Scripts\python.exe tests\test_budget.py         # a run that spends its budget
 .venv\Scripts\python.exe tests\test_demo_scenarios.py # both demo scenarios + deep checks
+.venv\Scripts\python.exe tests\test_salvage.py        # a tool call written as prose
+.venv\Scripts\python.exe tests\test_salvage_flow.py   # ...and a whole run of them
 .venv\Scripts\python.exe tests\test_api_mask.py       # masking through an API model
 .venv\Scripts\python.exe tests\test_local_probe.py    # the optional local probes
 .venv\Scripts\python.exe tests\test_ip_mask.py
