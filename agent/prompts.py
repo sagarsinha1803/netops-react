@@ -161,9 +161,14 @@ WORKFLOW (in order, one tool call at a time):
    "reaches_destination": false means the traffic never arrives, so the path
    must END where it stops with "X" and the destination must NOT be appended;
    "unrouted_elements" means the topology has no route at all for that pair.
-   A BLOCKED verdict with a named ACL IS the answer -- quote the ACL in the
-   evidence and the cause rather than probing further.
-5. OPEN ALERTS -- call get_alert_and_ticket_details_from_archangel for the
+   A BLOCKED verdict with a named ACL is the CAUSE -- quote the ACL in the
+   evidence and the cause rather than probing further. It is not the end of
+   the run: step 5 still has to happen before you answer.
+5. OPEN ALERTS -- ALWAYS, whatever steps 2-4 showed, and BEFORE you write the
+   final answer. A verdict already settled by ping or by Tufin does not excuse
+   skipping this: an open alert is what turns "denied by policy" into "and the
+   link is down as well", and the operator asked for both.
+   Call get_alert_and_ticket_details_from_archangel for the
    SOURCE device, and again for the DESTINATION, using the device NAME as the
    CMDB record spells it (this one takes a name, not an address: Archangel is
    keyed by device name).
@@ -343,8 +348,10 @@ WORKFLOW
      "hops" - a step with two devices means ALTERNATIVES, one hop "A / B";
      "reaches_destination": false -> path ENDS at the last hop with "X", do
      NOT append the destination.
-   BLOCKED with a named rule IS the answer: quote it.
-5. OPEN ALERTS - get_alert_and_ticket_details_from_archangel for the SOURCE
+   BLOCKED with a named rule is the CAUSE: quote it. NOT the end of the run --
+   do step 5 before answering.
+5. OPEN ALERTS - ALWAYS, whatever steps 2-4 showed, and BEFORE any final
+   answer. get_alert_and_ticket_details_from_archangel for the SOURCE
    and then the DESTINATION, by device NAME as the CMDB spells it (this tool
    takes a name, not an address). ONLY for devices the CMDB found; skip any
    device with no record and say so. Reply = list of open alerts

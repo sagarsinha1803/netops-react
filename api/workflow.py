@@ -136,6 +136,23 @@ def parse_alerts(blob):
     for value in data:
         items.extend(value if isinstance(value, list) else [value])
 
+    # Calling an MCP tool directly hands back CONTENT BLOCKS rather than the
+    # plain text the graph path gets: [{"type": "text", "text": "{...}"}].
+    # Unwrap them, or every column reads as empty while the row count looks
+    # perfectly correct -- which is worse than an outright failure.
+    unwrapped = []
+    for item in items:
+        if (isinstance(item, dict) and item.get("type") == "text"
+                and isinstance(item.get("text"), str)):
+            inner = _json_values(item["text"].strip())
+            for value in inner:
+                unwrapped.extend(value if isinstance(value, list) else [value])
+            if not inner:
+                return [], item["text"].strip()      # a sentence, not rows
+        else:
+            unwrapped.append(item)
+    items = unwrapped
+
     rows = []
     for item in items:
         if not isinstance(item, dict):

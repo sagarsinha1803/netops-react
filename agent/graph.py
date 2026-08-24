@@ -23,7 +23,7 @@ import os
 import sys
 from typing import Any
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
@@ -120,6 +120,12 @@ async def _load_tools(client):
 
 LAST_FAILED_SERVERS: dict = {}     # set by build_agent, read by the UI
 
+# name -> tool, for the few steps the API layer runs ITSELF when the model
+# skipped one. The workflow is fixed (CMDB, ping, traceroute, policy, alerts):
+# a model that concludes early should not silently drop a step the operator
+# asked for.
+TOOLS_BY_NAME: dict = {}
+
 
 async def build_agent(checkpointer=None):
     client = MultiServerMCPClient(C.MCP_SERVERS)
@@ -131,6 +137,8 @@ async def build_agent(checkpointer=None):
             "no MCP tools available - " +
             "; ".join(f"{s}: {e}" for s, e in failed.items()))
     by_name = {t.name: t for t in tools}
+    TOOLS_BY_NAME.clear()
+    TOOLS_BY_NAME.update(by_name)
     llm_with_tools = llm.bind_tools(tools)
 
     unavailable = ("\n\nNOTE: these MCP servers are unreachable right now, so "
@@ -264,22 +272,58 @@ async def build_agent(checkpointer=None):
         return {"messages": out_msgs, "loops": (state.get("loops") or 0) + 1,
                 "commands_run": audit, "devices": devices, **upd}
 
+    # ---- node: wrapup (answer with what we have) -------------------------
+    async def wrapup(state: NetState):
+        """The budget ran out mid-investigation: get an answer anyway.
+
+        Ending here used to mean ending on an AI message that is nothing but
+        tool calls -- no content, so no report, so the panel showed a run that
+        simply stopped. An engineer cannot tell that from a crash.
+
+        So ask once more with NO tools bound: the model cannot request another
+        call, and has to say what it found and what it could not finish.
+        """
+        msgs = list(state["messages"])
+        if not any(getattr(m, "type", "") == "system" for m in msgs):
+            msgs = [("system", SYSTEM_PROMPT + unavailable)] + msgs
+        msgs = msgs + [("user",
+                        "Stop investigating: the tool budget for this run is "
+                        "spent. Answer NOW from what you already have, in the "
+                        "required final format. Do not ask for another tool "
+                        "call. Any step you could not finish is INCONCLUSIVE "
+                        "-- say which, say what you would run next, and do not "
+                        "present a guess as a result.")]
+        reply = await llm.ainvoke(msgs)          # llm, not llm_with_tools
+        text = str(getattr(reply, "content", "") or "").strip()
+        if not text:
+            text = ("The tool budget for this run was spent before a "
+                    "conclusion was reached. Nothing here is a verdict: "
+                    "re-run with a narrower question, or run the remaining "
+                    "checks by hand.")
+        # a plain message, not the model's own: a model that ignores an empty
+        # tool list would otherwise leave a dangling tool call as the last
+        # message, and everything downstream reads that as "still working"
+        return {"messages": [AIMessage(content=text)], "answer": text}
+
     # ---- router: keep looping while the model asks for tools -------------
     def route(state: NetState):
         last = state["messages"][-1]
         if getattr(last, "tool_calls", None):
             cap = state.get("max_loops") or C.MAX_TOOL_LOOPS
             if (state.get("loops") or 0) >= cap:
-                return END          # cap reached -> stop instead of looping forever
+                return "wrapup"     # cap reached -> answer, do not just stop
             return "tools"
         return END
 
     g = StateGraph(NetState)
     g.add_node("agent", agent)
     g.add_node("tools", tools_node)
+    g.add_node("wrapup", wrapup)
     g.add_edge(START, "agent")
-    g.add_conditional_edges("agent", route, {"tools": "tools", END: END})
+    g.add_conditional_edges("agent", route,
+                            {"tools": "tools", "wrapup": "wrapup", END: END})
     g.add_edge("tools", "agent")
+    g.add_edge("wrapup", END)
     return g.compile(checkpointer=checkpointer or MemorySaver())
 
 

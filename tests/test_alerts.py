@@ -53,6 +53,20 @@ check("rows run together (MCP's list shape) all parse",
 check("and they keep their own devices, not just the last one",
       [r["alert_id"] for r in parsed] == [r["alert_id"] for r in rows])
 
+# Calling the tool directly (which the server does when the model skipped the
+# step) hands back content blocks instead of text. Row count looked right
+# while every column was blank -- worse than an outright failure.
+blocks = [{"type": "text", "text": json.dumps(r)} for r in rows]
+parsed, message = parse_alerts(json.dumps(blocks))
+check("MCP content blocks are unwrapped, not treated as rows",
+      len(parsed) == len(rows) and parsed[0]["device_name"] == rows[0]["device_name"],
+      str(parsed[:1])[:80])
+
+parsed, message = parse_alerts(json.dumps(
+    [{"type": "text", "text": "No open alerts found for 'X'."}]))
+check("a sentence inside a content block stays a sentence",
+      parsed == [] and "No open alerts" in message, message[:40])
+
 parsed, message = parse_alerts(str(rows))          # a python repr, not JSON
 check("a python repr parses too", len(parsed) == len(rows))
 

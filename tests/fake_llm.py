@@ -127,6 +127,14 @@ THOUGHTS = [
 ]
 
 
+# NETOPS_NO_ALERTS=1 makes this model behave like a weaker one: it concludes
+# on the Tufin verdict and never asks Archangel. That is the case the server's
+# own alert lookup exists to cover.
+if os.environ.get("NETOPS_NO_ALERTS") == "1":
+    SCRIPT = [s for s in SCRIPT if "archangel" not in s[0]]
+    THOUGHTS = [t for t in THOUGHTS if "Archangel" not in t
+                and "destination's open alerts" not in t]
+
 _REQUEST_RE = re.compile(r"troubleshoot\s+([\w.\-]+)\s+to\s+([\w.\-]+)", re.I)
 
 

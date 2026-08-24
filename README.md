@@ -177,6 +177,8 @@ not the alert database.
 .venv\Scripts\python.exe tests\test_tufin_shape.py    # SecureTrack reply shapes
 .venv\Scripts\python.exe tests\test_cmdb_record.py    # found vs not-found
 .venv\Scripts\python.exe tests\test_alerts.py         # Archangel rows -> the table
+.venv\Scripts\python.exe tests\test_alert_backstop.py # a model that skips step 5
+.venv\Scripts\python.exe tests\test_budget.py         # a run that spends its budget
 .venv\Scripts\python.exe tests\test_api_mask.py       # masking through an API model
 .venv\Scripts\python.exe tests\test_local_probe.py    # the optional local probes
 .venv\Scripts\python.exe tests\test_ip_mask.py

@@ -363,6 +363,7 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         return
 
     if workflow_turn and not show_commands:
+        await fill_alerts(sess, wf)
         down = ", ".join(net_agent.LAST_FAILED_SERVERS) or ""
         why = (f"skipped - {down} MCP unavailable" if down
                else "not run - the agent concluded before this step")
@@ -414,6 +415,72 @@ async def run_turn(sess: Session, text: str, show_commands=False):
     await sess.send({"type": "final", "answer": str(answer),
                      "report": parsed, "offer_deep": offer,
                      "is_deep": show_commands})
+
+
+async def fill_alerts(sess, wf):
+    """Run the alert lookup the model skipped.
+
+    The workflow is fixed -- CMDB, ping, traceroute, policy, alerts -- but the
+    model decides the order it works in, and a firewall verdict of BLOCKED
+    reads like the end of the story, so a weaker model concludes there and
+    never asks about alerts. The operator then sees a grey Alerts stage and an
+    empty tab with no way to tell "no alerts" from "never asked".
+
+    So the server runs it: one read-only query per device the CMDB actually
+    found, only when the model did not run it, keyed by the NAME the CMDB
+    returned. Nothing here touches a device.
+    """
+    if wf.scope != "path" or wf.alerts:
+        return
+    if wf.state["alerts"]["status"] not in ("pending", ""):
+        return
+    tool = net_agent.TOOLS_BY_NAME.get(
+        "get_alert_and_ticket_details_from_archangel")
+    if tool is None:                       # archangel unavailable: leave it grey
+        return
+
+    # the CMDB rows carry the name the record came back under
+    names = []
+    for row in wf.basics:
+        if row.get("kind") != "cmdb" or row.get("status") != "done":
+            continue
+        name = str(row.get("device") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    if not names:
+        return                             # nothing in the CMDB to key on
+
+    wf.set("alerts", "running", f"{len(names)} device(s), run by the workflow")
+    await sess.push_wf()
+
+    failed_any = False
+    for name in names:
+        idx = wf.add_basic(f"alerts({name})", thought="", kind="alerts")
+        await sess.push_wf()
+        try:
+            body = str(await tool.ainvoke({"device_name": name}))
+        except Exception as ex:            # noqa: BLE001
+            body = f"Error querying Archangel: {ex}"
+        await sess.send({"type": "tool_result",
+                         "name": "get_alert_and_ticket_details_from_archangel",
+                         "body": body[:3000]})
+        rows, message = parse_alerts(body)
+        failed = bool(message) and "no open alerts" not in message.lower()
+        failed_any = failed_any or failed
+        for row in rows:
+            if row not in wf.alerts:
+                wf.alerts.append(row)
+        wf.finish_basic(idx, not failed,
+                        f"{len(rows)} open alert(s)" if rows
+                        else (message[:70] or "no open alerts"),
+                        device="Archangel", output=body)
+        await sess.push_wf()
+
+    tickets = {r.get("ticket_id") for r in wf.alerts if r.get("ticket_id")}
+    wf.set("alerts", "failed" if failed_any else "done",
+           f"{len(wf.alerts)} alert(s), {len(tickets)} ticket(s)"
+           if wf.alerts else "no open alerts")
+    await sess.push_wf()
 
 
 # ---------------------------------------------------------------- websocket --
