@@ -746,11 +746,33 @@ def path_from_policy(body, src_label="source", dst_label="destination"):
             "note": note}
 
 
-# what a route/CEF entry says it will do next: "via 10.0.0.1, TenGigE0/0/0/3"
-_VIA = re.compile(r"via\s+(\d{1,3}(?:\.\d{1,3}){3})(?:\s*,\s*([A-Za-z][\w./:-]*))?",
-                  re.I)
-_ARP_INCOMPLETE = re.compile(r"incomplete", re.I)
-_IF_DOWN = re.compile(r"^(\S+)\s+is\s+(?:administratively\s+)?down", re.I | re.M)
+# Every platform spells the next hop differently, and a parser that knows only
+# one of them draws no path at all on the other four -- silently, because "no
+# next hop found" and "this device has no route" look identical from here.
+#
+#   NX-OS      *via 10.0.0.1, Eth1/3, [200/0], 02:14:31, bgp-65010
+#   IOS-XE     nexthop 10.0.0.1 TenGigabitEthernet0/0/3          (show ip cef)
+#   IOS/XR     * 10.0.0.1, from 10.0.0.1, via TenGigE0/0/0/1     (show route)
+#   IOS-XR     10.0.0.1, from 10.0.0.1                           (no interface)
+#   generic    next hop 10.0.0.1, TenGigE0/0/0/1
+_IP = r"\d{1,3}(?:\.\d{1,3}){3}"
+# an interface name has a digit in it somewhere: Eth1/3, ge-0/0/1, Vlan10,
+# TenGigabitEthernet0/0/3, Bundle-Ether90, port1
+_IFACE = r"[A-Za-z][\w./:-]*\d[\w./:-]*"
+
+_NEXT_HOP = tuple(re.compile(pattern, re.I | re.M) for pattern in (
+    rf"\*?\s*via\s+({_IP})\s*,\s*({_IFACE})",
+    rf"next\s*hop\s+({_IP})\s*,?\s*({_IFACE})?",
+    rf"^\s*\*?\s*({_IP})\s*,\s*from\s+{_IP}\s*(?:,\s*via\s+({_IFACE}))?",
+    rf"\*?\s*via\s+({_IP})()\b",
+))
+
+# "Incomplete" as a STATE, not the word appearing anywhere: NX-OS prints
+# INCOMPLETE in the MAC column, IOS prints it as the hardware address, IOS-XR
+# gives it its own State column
+_ARP_INCOMPLETE = re.compile(r"\bincomplete\b", re.I)
+_IF_DOWN = re.compile(
+    r"^\s*(\S+)\s+is\s+(?:administratively\s+)?down", re.I | re.M)
 
 
 def path_from_checks(checks, src_label="source", dst_label="destination"):
@@ -765,15 +787,25 @@ def path_from_checks(checks, src_label="source", dst_label="destination"):
     if not text.strip():
         return None
 
-    via = _VIA.search(text)
-    if not via:
+    next_hop, egress = "", ""
+    for pattern in _NEXT_HOP:
+        found = pattern.search(text)
+        if found:
+            next_hop = found.group(1)
+            egress = (found.group(2) or "").strip() if found.lastindex else ""
+            break
+    if not next_hop:
         return None
-    next_hop, egress = via.group(1), via.group(2) or ""
 
     unresolved = bool(_ARP_INCOMPLETE.search(text))
     down = [m.group(1) for m in _IF_DOWN.finditer(text)]
-    broken = egress and any(egress.lower() in d.lower() or d.lower() in egress.lower()
-                            for d in down)
+    # the route said which interface, or the only interface reported down is
+    # the one being asked about: IOS-XR's routing block names no interface at
+    # all, so without this the fault is invisible on exactly one platform
+    if not egress and len(down) == 1:
+        egress = down[0]
+    broken = bool(egress) and any(
+        egress.lower() in d.lower() or d.lower() in egress.lower() for d in down)
 
     hop = {"label": next_hop, "ip": None, "kind": "hop"}
     if egress:
