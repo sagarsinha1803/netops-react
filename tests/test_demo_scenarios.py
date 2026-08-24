@@ -43,7 +43,8 @@ def workflow_script(source, dest, service):
         ("get_device_details", {"device_name": dest}),
         ssh(source, f"ping {dest} repeat 3"),
         ssh(source, f"traceroute {dest} maxttl 5 timeout 1 probe 1 numeric"),
-        ("get_firewall_path", {"src": source, "dst": dest, "service": service}),
+        ("get_firewall_path", {"src": S.ip_of(source), "dst": S.ip_of(dest),
+                               "service": service}),
         alerts_for(0),
         alerts_for(1),
     ], [

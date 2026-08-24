@@ -255,6 +255,11 @@ with exactly these keys, never free prose:
 Use "INCONCLUSIVE" -- not "NOT REACHABLE" -- when probes were blocked but the
 routing looks correct. Include every key even if a value is "none".
 
+Send THAT OBJECT AND NOTHING ELSE: no summary before it, no ``` fence around
+it, no closing remark after it. The reply is read by a program that lays the
+fields out on screen -- the summary you would have written is what it builds
+from "evidence" and "cause", so writing it twice only risks the parse.
+
 For ANY OTHER question (a device lookup, an uptime check, a general question),
 do NOT use that schema. "final" is then either a plain string or a small object
 of your own keys -- answer normally, keep it short, and use markdown (bullets,
@@ -401,6 +406,9 @@ Use INCONCLUSIVE, not NOT REACHABLE, when probes were blocked but routing looks
 correct - unless Tufin returned BLOCKED with a named rule, which is NOT
 REACHABLE by policy: name the ACL in evidence and cause. For any OTHER question
 do not use that schema: "final" is then a plain string, answered briefly.
+Send that object ALONE: no prose before it, no ``` fence, nothing after. A
+program reads it and lays the fields out; a summary around it only risks the
+parse.
 """
 
 DEEP_CHECK_PROMPT = (

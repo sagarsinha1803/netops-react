@@ -55,13 +55,31 @@ G.llm = ScriptedModel(
         "And on the destination.",
         "Confirming the route exists, to rule out a routing fault.",
     ],
-    final={"source": "APP-SRV-DC1-020 / 10.10.1.20 (cisco IOS-XE)",
-           "destination": "PAY-API-DC2-010 / 172.20.5.10 (cisco NX-OS)",
-           "ping": "FAILED", "result": "NOT REACHABLE",
-           "evidence": ["ping 0/3", "traceroute stops at FW-DC1-EDGE-01",
-                        "Tufin BLOCKED by DENY-ALL"],
-           "cause": "Denied by policy: ACL DENY-ALL drops tcp:443.",
-           "next_step": "Raise a Tufin change request."})
+    # deliberately the messy shape a real model returns -- a prose summary, a
+    # fence, and the report wrapped in an envelope. A run that works is still a
+    # failed run if the answer lands in the Report tab as a wall of text.
+    final="""Final Thought: I have completed the troubleshooting process.
+
+- **Ping**: FAILED (0% success rate)
+- **Firewall Path Check**: BLOCKED by DENY-ALL
+
+Based on this information, the final result is as follows:
+
+```json
+{
+  "thought": "The ACL is what drops it.",
+  "final": {
+    "source": "APP-SRV-DC1-020 / 10.10.1.20 (cisco IOS-XE)",
+    "destination": "PAY-API-DC2-010 / 172.20.5.10 (cisco NX-OS)",
+    "ping": "FAILED",
+    "result": "NOT REACHABLE",
+    "evidence": ["ping 0/3", "traceroute stops at FW-DC1-EDGE-01",
+                 "Tufin BLOCKED by DENY-ALL"],
+    "cause": "Denied by policy: ACL DENY-ALL drops tcp:443.",
+    "next_step": "Raise a Tufin change request."
+  }
+}
+```""")
 
 import api.main as api                                          # noqa: E402
 from starlette.testclient import TestClient                     # noqa: E402
@@ -116,7 +134,13 @@ check("the earlier stages still reached a verdict",
       f"policy={steps.get('policy',{}).get('status')}")
 check("a verdict was still produced", bool(final.get("answer")),
       str(final.get("answer"))[:60])
-check("the report tab has something to show", bool(wf.get("report")))
+report = wf.get("report") or {}
+check("the report tab has something to show", bool(report))
+check("and it is a REPORT, not the model's prose dumped into the panel",
+      report.get("result") == "NOT REACHABLE" and "text" not in report,
+      str(sorted(report))[:80])
+check("the cause survived the unwrapping",
+      "DENY-ALL" in str(report.get("cause")), str(report.get("cause"))[:60])
 check("the path was parsed for the Path tab",
       bool((wf.get("path") or {}).get("nodes")),
       str((wf.get("path") or {}).get("line"))[:60])

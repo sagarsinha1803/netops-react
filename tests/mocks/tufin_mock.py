@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 
-from mcp_tools.tufin_mcp import summarise  # noqa: E402
+from mcp_tools.tufin_mcp import _looks_like_ip, summarise  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenarios as S  # noqa: E402
@@ -89,7 +89,20 @@ def get_firewall_path(
     dst: Annotated[str, Field(description="destination IPv4 address")],
     service: Annotated[Optional[str],
                        Field(description="e.g. tcp:443, udp:53, any")] = "any",
-) -> dict:
+) -> dict | str:
+    # the REAL server refuses a device name here, because SecureTrack matches
+    # its topology by address and answers about a pair that does not exist
+    # rather than complaining. A mock that quietly accepts names teaches the
+    # model a habit that fails in production, and hides the refusal the demo
+    # should be able to show.
+    bad = [f"{label}={value!r}" for label, value in (("src", src), ("dst", dst))
+           if not _looks_like_ip(value)]
+    if bad:
+        return ("get_firewall_path needs IP ADDRESSES, not device names: "
+                + ", ".join(bad)
+                + ". Use the managementIp from each device's CMDB record "
+                  "(get_device_details).")
+
     blocked = str(dst).strip() in _BLOCKED_DESTS
     return summarise(_payload(str(src).strip(), str(dst).strip(),
                               service or "any", blocked))

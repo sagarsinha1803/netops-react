@@ -407,24 +407,61 @@ def parse_request(text: str) -> dict:
             "protocol": (proto or "TCP").upper(), "port": port or "22"}
 
 
+# the fields the Report tab lays out; anything else is prose
+REPORT_KEYS = ("source", "destination", "result", "ping", "path", "cause",
+               "next_step", "evidence")
+
+
+def _unwrap(data):
+    """{"thought":.., "final":{..}} -> the report inside it."""
+    while isinstance(data, dict) and "final" in data:
+        inner = data["final"]
+        if not isinstance(inner, dict):
+            return {"text": str(inner)}
+        data = inner
+    return data
+
+
 def as_report(text: str):
-    """The final answer as structured data for the Report tab."""
+    """The final answer as structured data for the Report tab.
+
+    Models rarely hand back the bare object the prompt asks for. They summarise
+    in prose first, fence the JSON, wrap it in {"thought":.., "final":..}, or
+    all three at once -- and every one of those used to fall through to "show
+    the whole blob as text", which is how a finished run still looked like a
+    chatbot transcript instead of a report.
+
+    So: take the JSON wherever it is, unwrap the envelope, and only accept it
+    as a report if it actually carries report fields. A JSON object that is not
+    one -- a tool call the model narrated, say -- stays prose rather than
+    rendering as an empty report with every field blank.
+    """
     body = str(text or "").strip()
     if not body:
         return None
+
     if body.startswith("{"):
         try:
-            d = json.loads(body)
-            if isinstance(d, dict):
-                # The relay unwraps {"thought":.., "final":..} itself, but an
-                # API model handed the same schema often returns the whole
-                # envelope -- and then the raw JSON was shown as the answer.
-                if "final" in d:
-                    inner = d["final"]
-                    return inner if isinstance(inner, dict) else {"text": str(inner)}
-                return d
-        except Exception:
+            data = json.loads(body)
+            if isinstance(data, dict):
+                return _unwrap(data)
+        except Exception:                       # noqa: BLE001 -- try harder below
             pass
+
+    # prose around it, a ``` fence, smart quotes from a copy-paste: the relay's
+    # extractor already handles all of that, so use it rather than a second
+    # half-parser that will drift from it
+    try:
+        from agent.llm.clipboard_llm import _extract_json
+        found = _extract_json(body)
+    except Exception:                           # noqa: BLE001
+        found = None
+
+    if isinstance(found, dict):
+        report = _unwrap(found)
+        if isinstance(report, dict) and any(k in report for k in REPORT_KEYS):
+            return report
+
     return {"text": body}
 
 
