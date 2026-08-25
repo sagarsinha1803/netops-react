@@ -12,6 +12,7 @@ and the deep checks agree with the CMDB, the firewall verdict and the alerts.
 
     python device_mock.py            # stdio
 """
+import json
 import os
 import re
 import sys
@@ -124,9 +125,16 @@ def execute_query_on_server(device_ip: str, commands: list, region: str = "",
             # is built to notice that and try another syntax. Silence here
             # would teach it the command worked.
             body = f"% Invalid input detected at '^' marker.\n  {cmd}"
-        out.append(f"{prompt}# {cmd}\n{body}")
+        out.append({"cmd": cmd, "stdout": body, "stderr": "", "rc": 0})
 
-    return "\n\n".join(out)
+    # The REAL ssh MCP serialises its list before returning it, so the agent
+    # receives JSON TEXT rather than a list. Mocking the friendlier shape hid
+    # a fault: nothing unpacked the JSON, so the panel showed a blob with a
+    # red cross beside it and the traceroute path was never drawn at all.
+    # MOCK_PLAIN_TEXT=1 goes back to the friendly shape, for comparing the two.
+    if os.environ.get("MOCK_PLAIN_TEXT") == "1":
+        return "\n\n".join(f"{prompt}# {e['cmd']}\n{e['stdout']}" for e in out)
+    return json.dumps(out)
 
 
 if __name__ == "__main__":

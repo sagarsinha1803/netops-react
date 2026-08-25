@@ -36,14 +36,19 @@ def _cli_result(item: dict) -> str:
 
 
 def _one(item) -> str:
+    # A content block's text can ITSELF be a serialised list of CLI results:
+    # the ssh MCP serialises its list, and MCP then wraps that string in a
+    # block. Unwrapping only the block leaves the JSON, which is what put a
+    # blob in the panel and left the traceroute with no hops to draw.
     if isinstance(item, dict):
         if "text" in item:
-            return str(item["text"])
+            return _cli_json(str(item["text"])) or str(item["text"])
         if any(k in item for k in ("cmd", "command", "stdout", "output")):
             return _cli_result(item)
         return str(item)
     if hasattr(item, "text"):
-        return str(item.text)
+        text = str(item.text)
+        return _cli_json(text) or text
     return str(item)
 
 
