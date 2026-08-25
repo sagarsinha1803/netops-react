@@ -271,12 +271,19 @@ function PathChips({ path }) {
     <div className="pathchips">
       {hops.map((h, i) => {
         const last = i === hops.length - 1;
-        const dead = String(h).trim() === "X";
-        const cls = i === 0 ? "src" : dead ? "dead" : last ? "dst" : "";
+        const label = String(h).trim();
+        const dead = label === "X";
+        // "?" is not a device: it is the checks reaching the end of what they
+        // can prove. Drawing it as a hop would claim the path continues there.
+        const unknown = label === "?";
+        const cls = i === 0 ? "src" : dead ? "dead"
+          : unknown ? "unk" : last ? "dst" : "";
         return (
           <React.Fragment key={i}>
             {i > 0 && <span className="sep">▸</span>}
-            <span className={`hop mono ${cls}`}>{dead ? "✕ blocked" : String(h)}</span>
+            <span className={`hop mono ${cls}`}>
+              {dead ? "✕ blocked" : unknown ? "? unconfirmed" : label}
+            </span>
           </React.Fragment>
         );
       })}
@@ -320,7 +327,9 @@ function PathViews({ paths, fallback, verdictClass }) {
         return (
           <div className="pathview" key={v.key}>
             <div className="ph">
-              <span className={`pt ${p.reached ? "ok" : "bad"}`}>{v.label}</span>
+              {/* three states, not two: proven, disproven, and not settled */}
+              <span className={`pt ${p.reached === true ? "ok"
+                : p.reached === false ? "bad" : "warn"}`}>{v.label}</span>
               <span className="ps">{v.sub}</span>
             </div>
             <PathChips path={labels} />

@@ -410,3 +410,11 @@ table.alerts td.mono { font-family: ui-monospace, Consolas, monospace; }
   font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
   color: var(--dim); vertical-align: 1px;
 }
+
+/* the checks reached the end of what they can prove: not a device, not a wall */
+.pathchips .hop.unk {
+  border-color: var(--amber);
+  color: var(--amber);
+  border-style: dashed;
+}
+.pathview .pt.warn { color: var(--amber); }

@@ -127,6 +127,68 @@ report = as_report(NO_VERDICT) or {}
 check("an answer with no verdict parses as text, not as a report",
       not report.get("result"), str(report)[:60])
 
+# ---- 4. what the paths make of a real run ---------------------------------
+from agent.vendors import parse_hops                               # noqa: E402
+from api.workflow import path_from_checks, path_from_policy        # noqa: E402
+
+TRACE = "\r\n".join([
+    "", "", "Tue Aug 25 22:41:13.931 MEST", "",
+    "Type escape sequence to abort.",
+    "Tracing the route to 198.51.100.6", "",
+    " 1  203.0.113.2 2 msec ",
+    " 2  203.0.113.78 2 msec ",
+    " 3  203.0.113.190 2 msec ",
+    " 4  * ",
+    " 5  * ",
+    "",
+])
+hops = parse_hops(tool_text(json.dumps(
+    [{"cmd": "traceroute 198.51.100.6 maxttl 5 timeout 1 probe 1 numeric",
+      "stdout": TRACE, "rc": 0}])))
+check("the real traceroute yields hops, so the Path tab has one to draw",
+      len(hops) == 5, str(len(hops)))
+check("three answered and two did not",
+      sum(1 for h in hops if not h["timeout"]) == 3
+      and sum(1 for h in hops if h["timeout"]) == 2,
+      str([h["host"] or "*" for h in hops]))
+
+# an IOS-XR routing block names the next hop and NO interface
+XR = "\n".join([
+    "Routing entry for 198.51.100.6/32",
+    '  Known via "bgp 65000", distance 200, metric 0',
+    "  Routing Descriptor Blocks",
+    "    203.0.113.246, from 203.0.113.246",
+    "      Route metric is 0",
+])
+deep = path_from_checks([{"output": XR}], "edge-a1", "edge-a2")
+check("the deep path is drawn from IOS-XR output", deep is not None)
+check("it names the next hop the source is trying",
+      deep and "203.0.113.246" in deep["line"], deep and deep["line"])
+check("a route ALONE proves nothing about what happens after it",
+      deep and deep["reached"] is None,
+      "a route is an intention, not a delivery")
+check("so the path ends in a question, not at the destination",
+      deep and deep["nodes"][-1]["label"] == "?",
+      deep and deep["line"])
+
+confirmed = path_from_checks(
+    [{"output": XR + "\nInternet 203.0.113.246 3 0050.56be.7f01 ARPA Te0/0/0/0"}],
+    "edge-a1", "edge-a2")
+check("an ARP entry with a hardware address DOES settle it",
+      confirmed and confirmed["reached"] is True, confirmed and confirmed["line"])
+
+# SecureTrack lists the two ends and its own markers among the "devices"
+POLICY = json.dumps({"verdict": "ALLOWED",
+                     "hops": [["EDGE-A1"], ["EDGE-A2"],
+                              ["DIRECTLY_CONNECTED"]],
+                     "reaches_destination": True})
+pol = path_from_policy(POLICY, "EDGE-A1", "EDGE-A2")
+labels = [n["label"] for n in pol["nodes"]]
+check("the source is not drawn twice", labels.count("EDGE-A1") == 1, str(labels))
+check("nor the destination", labels.count("EDGE-A2") == 1, str(labels))
+check("and a routing marker is not drawn as equipment",
+      "DIRECTLY_CONNECTED" not in labels, str(labels))
+
 print()
 print("ALL PASSED" if not fails else f"FAILED ({len(fails)}): {fails}")
 sys.exit(1 if fails else 0)

@@ -559,7 +559,7 @@ _FAILED_OUTPUT = re.compile(
     # a real device prints "100.00% packet loss" or "100.0%", not "100%" --
     # matching only the round form read total loss as a success
     r"|(?<![\d.])100(?:\.0+)?% packet loss"
-    r"|0 (?:packets )?received"
+    r"|\b0 (?:packets )?received"
     r"|request timed out"
     r"|destination (host|net) unreachable"
     r"|% (network|destination) .*(not|unreachable)"
@@ -706,6 +706,12 @@ def _line(nodes) -> str:
         n["label"] + (f" ({n['ip']})" if n.get("ip") else "") for n in nodes)
 
 
+# SecureTrack labels some steps with what the hop IS rather than which device
+# it is. They belong in the note, not in the chain.
+_NOT_A_DEVICE = {"DIRECTLY_CONNECTED", "DIRECTLY CONNECTED", "UNROUTED",
+                 "INTERNET", "ANY", "UNKNOWN", "N/A", "NONE"}
+
+
 def path_from_policy(body, src_label="source", dst_label="destination"):
     """The device chain SecureTrack modelled, as a path."""
     import ast
@@ -734,9 +740,17 @@ def path_from_policy(body, src_label="source", dst_label="destination"):
                        or (data.get("path_calc_results") or {})
                        .get("unrouted_elements"))
 
+    ends = {str(src_label).strip().lower(), str(dst_label).strip().lower()}
     nodes = [{"label": src_label, "ip": None, "kind": "source"}]
     for step in hops:
-        names = [str(n) for n in (step if isinstance(step, list) else [step]) if n]
+        names = [str(n).strip() for n in
+                 (step if isinstance(step, list) else [step]) if n]
+        # SecureTrack's chain INCLUDES the two ends, and its own markers for
+        # what a hop is rather than which device it is. Drawing those gives
+        # "edge-a1 -> EDGE-A1 -> EDGE-A2 -> DIRECTLY_CONNECTED -> edge-a2":
+        # the source twice and a routing note dressed up as equipment.
+        names = [n for n in names
+                 if n.lower() not in ends and n.upper() not in _NOT_A_DEVICE]
         if not names:
             continue
         # two devices in one step are ALTERNATIVES, not a sequence: equal-cost
@@ -783,6 +797,13 @@ _ARP_INCOMPLETE = re.compile(r"\bincomplete\b", re.I)
 _IF_DOWN = re.compile(
     r"^\s*(\S+)\s+is\s+(?:administratively\s+)?down", re.I | re.M)
 
+# positive evidence that the next hop is really there: an ARP entry with a
+# hardware address behind it, or an interface the device calls up
+_ARP_RESOLVED = re.compile(
+    r"\b[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}\b"          # cisco 0050.56be.1a2b
+    r"|\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b", re.I)           # 00:50:56:be:1a:2b
+_IF_UP = re.compile(r"^\s*\S+\s+is\s+up,\s*line protocol is up", re.I | re.M)
+
 
 def path_from_checks(checks, src_label="source", dst_label="destination"):
     """What the deeper checks established about the next hop.
@@ -821,6 +842,14 @@ def path_from_checks(checks, src_label="source", dst_label="destination"):
         hop["via"] = egress
     nodes = [{"label": src_label, "ip": None, "kind": "source"}, hop]
 
+    # Absence of evidence is not evidence: a route pointing somewhere says
+    # what the source INTENDS, not that anything arrives. Only an ARP entry
+    # with a real address behind it, or an interface explicitly up, says the
+    # next hop is actually there. Without one of those this ends in "?" --
+    # drawing it through to the destination would contradict the run that
+    # produced it, which is how a panel loses an operator's trust for good.
+    confirmed = bool(_ARP_RESOLVED.search(text) or _IF_UP.search(text))
+
     if unresolved or broken:
         nodes.append({"label": "X", "ip": None, "kind": "dead"})
         why = []
@@ -832,11 +861,20 @@ def path_from_checks(checks, src_label="source", dst_label="destination"):
                 + (f" out {egress}" if egress else "")
                 + ", but " + " and ".join(why)
                 + " -- so nothing leaves here, whatever the policy allows.")
-    else:
+        reached = False
+    elif confirmed:
         nodes.append({"label": dst_label, "ip": None, "kind": "dest"})
         note = ("The source's forwarding entry for the destination is complete: "
                 "next hop " + next_hop + (f" out {egress}" if egress else "")
                 + ", resolved and up.")
+        reached = True
+    else:
+        nodes.append({"label": "?", "ip": None, "kind": "unknown"})
+        note = ("The source forwards toward " + next_hop
+                + (f" out {egress}" if egress else "")
+                + ". Nothing in these checks confirms or denies what happens "
+                  "after that hop -- to settle it, look at the next hop itself.")
+        reached = None
 
     return {"nodes": nodes, "line": _line(nodes),
-            "reached": not (unresolved or broken), "note": note}
+            "reached": reached, "note": note}
