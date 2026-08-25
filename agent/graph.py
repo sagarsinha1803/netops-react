@@ -20,6 +20,7 @@ Two guards, because the model is choosing commands that run on real devices:
 """
 import asyncio
 import os
+import subprocess
 import sys
 from typing import Any
 
@@ -84,6 +85,56 @@ SYSTEM_PROMPT = prompts.system_prompt(C.LLM_MODE)
 
 
 # ============================== GRAPH ========================================
+def _why_dead(server: str, spec, error) -> str:
+    """What actually went wrong, rather than what the wrapper says went wrong.
+
+    A stdio MCP server that dies during startup surfaces as "unhandled errors
+    in a TaskGroup (1 sub-exception)" -- the same sentence whether the script
+    is missing, an import failed, or the interpreter is the wrong one. Four
+    servers failing at once printed that sentence four times and named no
+    cause, which is a dead end for anyone who is not holding the source.
+
+    So: unwrap the exception group, and for a local subprocess RUN it and
+    report what it printed on the way down. That turns the message into
+    "ModuleNotFoundError: No module named 'scenarios'".
+    """
+    def flatten(exc, depth=0):
+        subs = getattr(exc, "exceptions", None)
+        if subs and depth < 4:
+            out = []
+            for sub in subs:
+                out.extend(flatten(sub, depth + 1))
+            return out
+        text = str(exc).strip()
+        return [f"{type(exc).__name__}: {text}" if text else type(exc).__name__]
+
+    detail = "; ".join(dict.fromkeys(flatten(error)))
+
+    if not isinstance(spec, dict) or spec.get("transport") != "stdio":
+        return detail or "unreachable"
+
+    args = list(spec.get("args") or [])
+    script = args[0] if args else ""
+    if script and not os.path.exists(script):
+        return f"{os.path.basename(script)} is missing from {os.path.dirname(script)}"
+
+    try:
+        # it exits as soon as stdin closes; whatever it printed to stderr on
+        # the way down is the actual fault
+        done = subprocess.run([spec.get("command", sys.executable), *args],
+                              input="", capture_output=True, text=True,
+                              timeout=20)
+        lines = [ln.strip() for ln in (done.stderr or "").splitlines() if ln.strip()]
+        # the last line of a traceback is the exception; the rest is noise
+        blame = next((ln for ln in reversed(lines)
+                      if "Error" in ln or "error" in ln), "")
+        if blame:
+            return f"{os.path.basename(script)}: {blame}"
+    except Exception:                        # noqa: BLE001 -- diagnosis only
+        pass
+    return detail or "unreachable"
+
+
 async def _load_tools(client):
     """Return (tools, owner, failed).
 
@@ -109,7 +160,7 @@ async def _load_tools(client):
             got = await client.get_tools()
             return got, {}, {}               # unknown origin -> deny by default
         except Exception as e:               # unreachable / crashed MCP server
-            msg = str(e) or e.__class__.__name__
+            msg = _why_dead(server, C.MCP_SERVERS.get(server), e)
             failed[server] = msg
             print(f"[MCP] server '{server}' unavailable: {msg}", file=sys.stderr)
             continue
