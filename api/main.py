@@ -567,6 +567,29 @@ _DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                      "frontend", "dist")
 
 
+def _warn_if_ui_is_stale():
+    """Say so when the built UI is older than the code that produced it.
+
+    frontend/dist is a build output and is not in git, so pulling brings new UI
+    source and leaves the old bundle in place. The backend then sends stages
+    and tabs that the page has no idea how to draw, and the feature looks
+    broken rather than unbuilt. run.ps1 rebuilds automatically; this is for
+    everyone who starts uvicorn directly.
+    """
+    index = os.path.join(_DIST, "index.html")
+    src = os.path.join(os.path.dirname(_DIST), "src")
+    if not os.path.exists(index) or not os.path.isdir(src):
+        return
+    built = os.path.getmtime(index)
+    newest = max((os.path.getmtime(os.path.join(root, f))
+                  for root, _dirs, files in os.walk(src) for f in files),
+                 default=0)
+    if newest > built:
+        print("[UI] frontend/dist is OLDER than frontend/src: the page you get "
+              "may be missing tabs and stages the backend now sends. "
+              "Rebuild it:  cd frontend; npm run build", file=sys.stderr)
+
+
 class _Frontend(StaticFiles):
     """Static files, with index.html never cached.
 
@@ -584,6 +607,7 @@ class _Frontend(StaticFiles):
 
 
 if os.path.isdir(_DIST):
+    _warn_if_ui_is_stale()
     app.mount("/", _Frontend(directory=_DIST, html=True), name="frontend")
 else:
     @app.get("/")

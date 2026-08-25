@@ -34,6 +34,12 @@ the laptop, and there is nothing to leave.
 
 Then open <http://localhost:8000>.
 
+**After a `git pull`, let it rebuild.** `frontend/dist` is a build output and
+is not in git, so pulling brings new UI source and leaves the old bundle
+behind. run.ps1 notices and rebuilds -- give it the twenty seconds. Skipping it
+means the backend sends tabs the page cannot draw, and the Alerts tab simply
+will not be there.
+
 ---
 
 ## Scenario 1 — the healthy path (≈4 min)
