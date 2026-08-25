@@ -77,6 +77,47 @@ _ROLE = {"system": "Context", "human": "Question", "user": "Question",
          "tool": "Result from"}
 
 
+_VERDICT_WORDS = ("success rate", "packet loss", "verdict", "blocked",
+                  "allowed", "open alert", "no data found", "% invalid")
+
+
+def _recap(messages: Sequence[BaseMessage], limit: int = 14) -> str:
+    """One line per result already gathered this run.
+
+    delta and agent mode paste only what is NEW and rely on the chat window to
+    remember the rest. Copilot's window is finite, so on a long run the
+    earliest results fall out of it -- and the model, asked to conclude,
+    correctly reports that it cannot: "the firewall-path verdict is missing
+    from the provided context". It is right, and the run is wasted.
+
+    A recap costs far less than resending everything: the tool and the one line
+    that mattered, so the evidence is in front of it whatever the window has
+    dropped. It is built from the same messages, so the same masking applies.
+    """
+    lines = []
+    for m in messages:
+        if getattr(m, "type", "") != "tool":
+            continue
+        body = str(getattr(m, "content", "") or "")
+        useful = [ln.strip() for ln in body.splitlines()
+                  if ln.strip() and not ln.strip().startswith("#")]
+        summary = useful[0] if useful else "(no output)"
+        for line in useful:                     # prefer the line with a verdict
+            if any(word in line.lower() for word in _VERDICT_WORDS):
+                summary = line
+                break
+        lines.append(f"- {getattr(m, 'name', '') or 'tool'}: {summary[:150]}")
+
+    if not lines:
+        return ""
+    kept = lines[-limit:]
+    head = ("\n\nRESULTS ALREADY GATHERED THIS RUN (use these for the final "
+            "answer; do not run them again")
+    if len(lines) > len(kept):
+        head += f"; most recent {len(kept)} of {len(lines)}"
+    return head + "):\n" + "\n".join(kept)
+
+
 def _render(messages: Sequence[BaseMessage]) -> str:
     """Flatten chat messages into one pasteable block."""
     parts = []
@@ -319,7 +360,8 @@ class ClipboardLLM(BaseChatModel):
             self._sent_count = len(messages)
             new = [m for m in messages[already:]
                    if _ROLE.get(getattr(m, "type", ""), "") != "Context"]
-            return _render(new or body[-1:] if body else messages[-1:])
+            return (_render(new or body[-1:] if body else messages[-1:])
+                    + _recap(messages))
 
         if self.mode != "delta":
             return _render(messages) + tools_txt
@@ -336,7 +378,7 @@ class ClipboardLLM(BaseChatModel):
         self._sent_count = len(messages)
         reminder = ("\n\nPlease answer in the same JSON form as before."
                     if self.tool_schemas else "")
-        return _render(new_msgs) + reminder
+        return _render(new_msgs) + _recap(messages) + reminder
 
     # ---- reply parsing ------------------------------------------------------
     def _to_message(self, text: str) -> AIMessage:

@@ -401,8 +401,17 @@ async def run_turn(sess: Session, text: str, show_commands=False):
                        f"{len(tried)} attempt(s), no result to report")
             else:
                 wf.set(key, "skipped", wf.state[key]["detail"] or why)
-        wf.set("done", "done",
-               "lookup complete" if wf.scope == "lookup" else "report ready")
+        # A run that ends without a verdict has not concluded, whatever it
+        # printed. Ticking Conclusion over "a reachability verdict cannot be
+        # determined" tells the operator the opposite of what happened.
+        verdict = str((as_report(state.get("answer") or "") or {}).get("result")
+                      or "").strip()
+        if wf.scope == "lookup":
+            wf.set("done", "done", "lookup complete")
+        elif verdict:
+            wf.set("done", "done", "report ready")
+        else:
+            wf.set("done", "failed", "no verdict reached")
 
     answer = state.get("answer") or (
         state["messages"][-1].content if state.get("messages") else "")

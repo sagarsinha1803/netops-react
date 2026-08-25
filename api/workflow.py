@@ -556,7 +556,10 @@ _FAILED_OUTPUT = re.compile(
     r"^\s*(REJECTED|\[error|error:)"
     r"|unknown tool"
     r"|success rate is 0 percent"
-    r"|100% packet loss"
+    # a real device prints "100.00% packet loss" or "100.0%", not "100%" --
+    # matching only the round form read total loss as a success
+    r"|(?<![\d.])100(?:\.0+)?% packet loss"
+    r"|0 (?:packets )?received"
     r"|request timed out"
     r"|destination (host|net) unreachable"
     r"|% (network|destination) .*(not|unreachable)"

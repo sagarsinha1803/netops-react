@@ -56,10 +56,44 @@ def tool_text(result) -> str:
     model gets to read.
     """
     if isinstance(result, str):
+        # The real ssh MCP hands its list back ALREADY SERIALISED, so what
+        # arrives is the JSON text of [{"cmd": ..., "stdout": "...\r\n..."}]
+        # rather than the list itself. Left alone, the model reads escaped
+        # JSON instead of a CLI session -- and the panel judged the row on it,
+        # so a ping that ran perfectly well came back as a red cross with a
+        # blob of JSON where its result should be.
+        decoded = _cli_json(result)
+        if decoded is not None:
+            return decoded
         return result.replace("\r\n", "\n")
     if isinstance(result, (list, tuple)):
         return "\n".join(_one(item) for item in result)
     return _one(result)
+
+
+_CLI_KEYS = ("cmd", "command", "stdout", "stderr", "rc")
+
+
+def _cli_json(text: str):
+    """Flattened text if `text` is a serialised list of CLI results, else None.
+
+    Deliberately narrow: it fires only when the decoded value really is CLI
+    output. A CMDB record is also JSON, and parsing that here would turn a
+    perfectly good record into a Python repr -- worse than leaving it alone.
+    """
+    stripped = text.strip()
+    if not stripped.startswith(("[", "{")):
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except Exception:                        # noqa: BLE001 -- not JSON, fine
+        return None
+    items = parsed if isinstance(parsed, list) else [parsed]
+    if not items or not all(isinstance(i, dict) for i in items):
+        return None
+    if not any(k in i for i in items for k in _CLI_KEYS):
+        return None
+    return "\n".join(_one(item) for item in items)
 
 
 def commands_of(args: dict) -> list:
