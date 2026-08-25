@@ -734,11 +734,24 @@ def path_from_policy(body, src_label="source", dst_label="destination"):
     if not hops:
         return None
 
-    reached = data.get("reaches_destination")
-    if reached is None:
-        reached = not (data.get("unrouted_elements")
-                       or (data.get("path_calc_results") or {})
-                       .get("unrouted_elements"))
+    # Two different questions, and the drawing has to answer both: does the
+    # topology ROUTE it, and does the policy PERMIT it. SecureTrack can model
+    # a complete chain end to end and deny the traffic on it -- that is what a
+    # firewall is. Reading only the routing drew a green line to a destination
+    # nothing reaches, directly contradicting the BLOCKED verdict beside it.
+    routed = data.get("reaches_destination")
+    if routed is None:
+        routed = not (data.get("unrouted_elements")
+                      or (data.get("path_calc_results") or {})
+                      .get("unrouted_elements"))
+
+    verdict, acl = policy_verdict(str(body or ""))
+    if verdict == "BLOCKED":
+        reached = False
+    elif verdict == "ALLOWED":
+        reached = bool(routed)
+    else:
+        reached = None if routed else False
 
     ends = {str(src_label).strip().lower(), str(dst_label).strip().lower()}
     nodes = [{"label": src_label, "ip": None, "kind": "source"}]
@@ -756,16 +769,31 @@ def path_from_policy(body, src_label="source", dst_label="destination"):
         # two devices in one step are ALTERNATIVES, not a sequence: equal-cost
         # next hops that rejoin. Sequencing them invents a route through both.
         nodes.append({"label": " / ".join(names), "ip": None, "kind": "hop"})
-    nodes.append({"label": dst_label if reached else "X", "ip": None,
-                  "kind": "dest" if reached else "dead"})
+    if reached is True:
+        nodes.append({"label": dst_label, "ip": None, "kind": "dest"})
+    elif reached is False:
+        nodes.append({"label": "X", "ip": None, "kind": "dead"})
+    else:
+        nodes.append({"label": "?", "ip": None, "kind": "unknown"})
 
     note = str(data.get("path_note") or "")
     if not note:
-        note = ("Modelled by SecureTrack from the topology and the rules -- "
-                "not a live probe." if reached else
-                "SecureTrack has no route for this pair: the traffic is not "
-                "delivered anywhere.")
-    return {"nodes": nodes, "line": _line(nodes), "reached": bool(reached),
+        modelled = ("Modelled by SecureTrack from the topology and the rules "
+                    "-- not a live probe.")
+        if verdict == "BLOCKED":
+            note = (f"The chain is routed end to end, but the traffic is "
+                    f"denied on it{f' by {acl}' if acl else ''} -- so it stops "
+                    f"there rather than arriving. " + modelled)
+        elif not routed:
+            note = ("SecureTrack has no route for this pair: the traffic is "
+                    "not delivered anywhere.")
+        elif reached is None:
+            note = ("SecureTrack modelled the chain but returned no verdict "
+                    "for it, so whether the traffic is permitted is unsettled. "
+                    + modelled)
+        else:
+            note = modelled
+    return {"nodes": nodes, "line": _line(nodes), "reached": reached,
             "note": note}
 
 

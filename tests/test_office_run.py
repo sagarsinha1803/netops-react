@@ -189,6 +189,68 @@ check("nor the destination", labels.count("EDGE-A2") == 1, str(labels))
 check("and a routing marker is not drawn as equipment",
       "DIRECTLY_CONNECTED" not in labels, str(labels))
 
+
+# ---- 5. a BLOCKED path must not be drawn as arriving -----------------------
+# SecureTrack can model a complete chain AND deny the traffic on it -- that is
+# what a firewall is. Reading only the routing drew a green line through to the
+# destination while the verdict beside it said BLOCKED.
+BLOCKED = json.dumps({
+    "traffic_allowed": False,
+    "verdict": "BLOCKED",
+    "blocking_rules": [{"action": "Deny", "acl": "Clean Up Rule",
+                        "rule_id": "40"}],
+    "rules_seen": 3,
+    "device_path": ["EDGE-SW-01", "FW-EDGE-01", "CORE-01"],
+    "hops": [["EDGE-SW-01"], ["FW-EDGE-01"], ["CORE-01"],
+             ["Cloud 203.0.113.49"]],
+    "device_count": 4,
+    "reaches_destination": None,       # SecureTrack often says nothing here
+    "unrouted_elements": [],
+})
+blocked = path_from_policy(BLOCKED, "198.51.100.10", "198.51.100.20")
+check("a BLOCKED path does not reach the destination",
+      blocked["reached"] is False, str(blocked["reached"]))
+check("it ends in a wall, not in the destination",
+      blocked["nodes"][-1]["label"] == "X", blocked["line"][-40:])
+check("the destination is not drawn as if traffic arrived",
+      "198.51.100.20" not in blocked["line"], blocked["line"])
+check("and the note says the traffic is denied ON the chain, not lost",
+      "denied" in blocked["note"] and "Clean Up Rule" in blocked["note"],
+      blocked["note"][:100])
+check("the modelled devices are still shown -- they are where it stops",
+      "FW-EDGE-01" in blocked["line"], blocked["line"])
+
+ALLOWED = json.dumps({
+    "traffic_allowed": True, "verdict": "ALLOWED", "blocking_rules": [],
+    "hops": [["EDGE-SW-01"], ["FW-EDGE-01"]],
+    "reaches_destination": None, "unrouted_elements": [],
+})
+allowed = path_from_policy(ALLOWED, "198.51.100.10", "198.51.100.20")
+check("an ALLOWED and routed path DOES reach the destination",
+      allowed["reached"] is True, str(allowed["reached"]))
+check("and names it at the end", allowed["nodes"][-1]["label"] == "198.51.100.20",
+      allowed["line"][-30:])
+
+UNROUTED = json.dumps({
+    "verdict": "UNKNOWN", "hops": [["EDGE-SW-01"]],
+    "unrouted_elements": [{"destination": "198.51.100.20"}],
+})
+unrouted = path_from_policy(UNROUTED, "198.51.100.10", "198.51.100.20")
+check("no route at all is still a dead end",
+      unrouted["reached"] is False, str(unrouted["reached"]))
+check("and says the traffic is delivered nowhere",
+      "not delivered anywhere" in unrouted["note"], unrouted["note"][:60])
+
+NO_VERDICT_POLICY = json.dumps({
+    "hops": [["EDGE-SW-01"]], "reaches_destination": None,
+    "unrouted_elements": [],
+})
+unsettled = path_from_policy(NO_VERDICT_POLICY, "198.51.100.10", "198.51.100.20")
+check("a routed chain with NO verdict is unsettled, not a success",
+      unsettled["reached"] is None, str(unsettled["reached"]))
+check("so it ends in a question", unsettled["nodes"][-1]["label"] == "?",
+      unsettled["line"][-20:])
+
 print()
 print("ALL PASSED" if not fails else f"FAILED ({len(fails)}): {fails}")
 sys.exit(1 if fails else 0)

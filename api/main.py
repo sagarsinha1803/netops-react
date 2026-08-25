@@ -380,6 +380,13 @@ async def run_turn(sess: Session, text: str, show_commands=False):
 
     if workflow_turn and not show_commands:
         await fill_alerts(sess, wf)
+        # Archangel is keyed by device NAME. With no CMDB record there is no
+        # name -- so a lookup by address answers "no open alerts found for
+        # <address>", which is true and useless, and a green tick over it says
+        # the alerts were checked when they could not be.
+        if wf.cmdb_miss and not wf.alerts:
+            wf.set("alerts", "skipped",
+                   "no CMDB record, so no device name to look alerts up by")
         down = ", ".join(net_agent.LAST_FAILED_SERVERS) or ""
         why = (f"skipped - {down} MCP unavailable" if down
                else "not run - the agent concluded before this step")
