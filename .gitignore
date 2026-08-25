@@ -28,6 +28,8 @@ venv/
 
 # frontend
 frontend/node_modules/
+vscodelm-bridge/node_modules/
+vscodelm-bridge/*.vsix
 frontend/dist/
 
 # config backups: same reason as .env itself

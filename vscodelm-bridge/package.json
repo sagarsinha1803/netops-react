@@ -1,0 +1,36 @@
+{
+  "name": "lm-bridge",
+  "displayName": "LM Bridge",
+  "description": "Serve the VS Code language models (GitHub Copilot) as a local OpenAI-compatible endpoint",
+  "version": "1.0.0",
+  "publisher": "local",
+  "private": true,
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "scripts": {
+    "test": "node test/test_bridge.js"
+  },
+  "contributes": {
+    "commands": [
+      { "command": "lmBridge.status", "title": "LM Bridge: Status" },
+      { "command": "lmBridge.models", "title": "LM Bridge: List Models" },
+      { "command": "lmBridge.restart", "title": "LM Bridge: Restart" }
+    ],
+    "configuration": {
+      "title": "LM Bridge",
+      "properties": {
+        "lmBridge.port": {
+          "type": "number",
+          "default": 11434,
+          "description": "Port to listen on, bound to 127.0.0.1 only. 11434 is also Ollama's default -- change it if both run."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.95.0"
+  }
+}

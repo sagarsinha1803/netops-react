@@ -145,11 +145,15 @@ next to them, which is how one real defect passed all of them.
 See [DEMO.md](DEMO.md) for what they show and what to say while they run.
 
 **3. In the browser**, with the model you actually use — the VS Code Copilot
-bridge, or the clipboard relay:
+bridge in [vscodelm-bridge/](vscodelm-bridge/README.md), or the clipboard relay:
 
 ```powershell
 $env:LLM_MODE="api"; $env:LLM_BASE_URL="http://localhost:11434/v1"; .\run.ps1 -Mock
 ```
+
+The bridge serves Copilot's **gpt-4o-mini** as an OpenAI-compatible endpoint on
+127.0.0.1, so the agent needs no API key of its own. One model, deliberately:
+see its README for why.
 
 Ask for `10.10.1.20` to `172.20.5.10` on `tcp:443`. Expect: CMDB green, ping
 red (it is meant to fail), traceroute green, Tufin red with DENY-ALL, Alerts
