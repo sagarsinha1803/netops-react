@@ -335,6 +335,54 @@ both = path_from_checks([route_only, trace, vrf_ping], "EDGE-A1", "EDGE-B2", DES
 check("a probe that answered outranks a trace that did not",
       both["reached"] is True, str(both["reached"]))
 
+
+# ---- 7. a proved path shows its hops, from the right context ---------------
+# "Reachable" drawn as two nodes with nothing between them asks the reader to
+# take it on faith. The hops are usually right there in the run.
+vrf_trace = {
+    "cmd": f"traceroute vrf EXAMPLE-VRF {DEST} maxttl 5 timeout 1 probe 1",
+    "output": (f"Tracing the route to {DEST}\n"
+               " 1  203.0.113.2 2 msec\n"
+               " 2  203.0.113.78 2 msec\n"
+               " 3  * \n"
+               " 4  203.0.113.202 3 msec\n"),
+}
+global_trace = {
+    "cmd": f"traceroute {DEST} maxttl 5 timeout 1 probe 1",
+    "output": (f"Tracing the route to {DEST}\n"
+               " 1  198.18.0.9 1 msec\n 2  * \n 3  * \n"),
+}
+
+shown = path_from_checks([route_only, vrf_ping, vrf_trace],
+                         "EDGE-A1", "EDGE-B2", DEST)
+check("a proved path draws the hops behind it",
+      "203.0.113.78" in shown["line"], shown["line"])
+check("it still ends at the destination, since the probe arrived",
+      shown["nodes"][-1]["label"] == "EDGE-B2" and shown["reached"] is True,
+      shown["line"])
+check("a silent hop among answering ones is drawn as hidden, not as a wall",
+      "hidden hop" in shown["line"], shown["line"])
+check("and the note says where the hops came from",
+      "same context" in shown["note"], shown["note"][-120:])
+
+# a traceroute from ANOTHER table proves nothing about this path
+mixed = path_from_checks([route_only, global_trace, vrf_ping],
+                         "EDGE-A1", "EDGE-B2", DEST)
+check("a global-table trace is NOT drawn under a VRF verdict",
+      "198.18.0.9" not in mixed["line"], mixed["line"])
+check("the next hop from the source's own routing is used instead",
+      "203.0.113.2" in mixed["line"], mixed["line"])
+check("and the note admits the hops between are not known",
+      "no traceroute was run in that context" in mixed["note"].lower(),
+      mixed["note"][-120:])
+
+# nothing to draw with at all: still honest, still arrives
+bare = path_from_checks([vrf_ping], "EDGE-A1", "EDGE-B2", DEST)
+check("with no routing evidence it is still REACHED",
+      bare["reached"] is True, str(bare["reached"]))
+check("and says the hops are not shown rather than inventing them",
+      "not shown" in bare["note"], bare["note"][-90:])
+
 print()
 print("ALL PASSED" if not fails else f"FAILED ({len(fails)}): {fails}")
 sys.exit(1 if fails else 0)

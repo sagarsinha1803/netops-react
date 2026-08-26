@@ -456,10 +456,16 @@ function Report({ final, busy, deepRunning, cmdbMiss, alerts, paths, onDeep }) {
   // proved the destination reachable still read "not reachable" at the top,
   // with the proof three tabs away.
   const deep = final.deepReport || {};
-  const latest = deep.result ? deep : rep;
-  const verdict = latest.result || (rep.text || final.answer ? "ANSWER" : "?");
-  const cls = verdictClass(latest.result);
-  const showVerdict = latest.result || latest.ping || rep.ping;
+  // The banner keeps the RUN's verdict -- the one the workflow reached with
+  // the request as it was asked. A deeper check that succeeds in another
+  // routing context has not made the original request work: the ping the user
+  // asked about still failed, and a green "ping success" over it would be a
+  // different claim from the one the evidence supports. The revision is shown
+  // as its own line instead, and drawn in the Path tab.
+  const revised = deep.result && deep.result !== rep.result ? deep.result : "";
+  const verdict = rep.result || (rep.text || final.answer ? "ANSWER" : "?");
+  const cls = verdictClass(rep.result);
+  const showVerdict = rep.result || rep.ping;
   const isSchema = !!(rep.source || rep.destination || rep.result);
   const [tab, setTab] = useState("report");
 
@@ -488,14 +494,15 @@ function Report({ final, busy, deepRunning, cmdbMiss, alerts, paths, onDeep }) {
       {showVerdict && (
         <div className={`verdict-bar ${cls}`}>
           {cls === "ok" ? "✓" : cls === "bad" ? "✕" : "!"} {String(verdict)}
-          {(latest.ping || rep.ping) && (
-            <span className="sub">
-              ping {String(latest.ping || rep.ping).toLowerCase()}
-              {deep.result && deep.result !== rep.result
-                ? " · revised by the deeper checks"
-                : ""}
-            </span>
+          {rep.ping && (
+            <span className="sub">ping {String(rep.ping).toLowerCase()}</span>
           )}
+        </div>
+      )}
+      {revised && (
+        <div className={`revised ${verdictClass(revised)}`}>
+          Deeper checks reached a different result: <b>{String(revised)}</b>
+          {" — see the Path and Deep tabs for what changed."}
         </div>
       )}
       <div className="report-tabs">

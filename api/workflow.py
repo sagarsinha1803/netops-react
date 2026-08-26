@@ -853,18 +853,80 @@ def _probe_settled(checks, src_label, dst_label, dest_addr):
             continue
         if not check_ok(out) or not usable_output(out, cmd):
             continue
-        context = ""
         vrf = re.search(r"\bvrf\s+(\S+)", cmd, re.I)
-        if vrf:
-            context = f" in VRF {vrf.group(1)}"
-        nodes = [{"label": src_label, "ip": None, "kind": "source"},
-                 {"label": dst_label, "ip": None, "kind": "dest"}]
+        context = f" in VRF {vrf.group(1)}" if vrf else ""
+
+        # The hops behind the verdict, from the SAME routing context. A
+        # global-table traceroute says nothing about a path that only works
+        # inside a VRF: drawing one under the other's verdict would be
+        # inventing a route.
+        middle, how = _hops_in_context(checks, vrf.group(1) if vrf else "",
+                                       dest_addr)
+        nodes = ([{"label": src_label, "ip": None, "kind": "source"}]
+                 + middle
+                 + [{"label": dst_label, "ip": None, "kind": "dest"}])
+        note = (f"A ping run during the deeper checks{context} reached the "
+                f"destination and got replies. That settles reachability: the "
+                f"earlier failure was the wrong routing context, not a broken "
+                f"path.")
+        if how:
+            note += " " + how
+        elif not middle:
+            note += (" No traceroute was run in that context, so the hops "
+                     "between are not shown -- the probe proves it arrives, "
+                     "not which way it went.")
         return {"nodes": nodes, "line": _line(nodes), "reached": True,
-                "note": (f"A ping run during the deeper checks{context} "
-                         f"reached the destination and got replies. That "
-                         f"settles reachability: the earlier failure was the "
-                         f"wrong routing context, not a broken path.")}
+                "note": note}
     return None
+
+
+def _hops_in_context(checks, vrf, dest_addr):
+    """(hop nodes, how they were established) for one routing context."""
+    from agent import vendors
+
+    for check in reversed(checks or []):
+        cmd = str(check.get("cmd") or "")
+        if not re.match(r"^\s*(traceroute|tracert|tracepath)\b", cmd, re.I):
+            continue
+        found = re.search(r"\bvrf\s+(\S+)", cmd, re.I)
+        if (found.group(1) if found else "") != vrf:
+            continue                            # a different table entirely
+        hops = vendors.parse_hops(str(check.get("output") or ""))
+        nodes, hidden = [], 0
+        for hop in hops:
+            if hop.get("timeout"):
+                hidden += 1
+                nodes.append({"label": "hidden hop", "ip": None,
+                              "kind": "unknown"})
+                continue
+            label = str(hop.get("host") or hop.get("ip") or "")
+            if not label or label == str(dest_addr):
+                continue                        # the destination is drawn once
+            nodes.append({"label": label, "ip": None, "kind": "hop"})
+        while nodes and nodes[-1]["kind"] == "unknown":
+            nodes.pop()                         # trailing silence, after arrival
+            hidden -= 1
+        if nodes:
+            how = "The hops are from a traceroute run in the same context."
+            if hidden > 0:
+                how += (f" {hidden} of them answered nothing while later hops "
+                        f"did -- a device declining to reply, not a break.")
+            return nodes, how
+
+    # No trace in that context. The route's own next hop is still more than a
+    # bare line, and it is the one thing the checks did establish.
+    text = "\n".join(str(c.get("output") or "") for c in (checks or []))
+    for pattern in _NEXT_HOP:
+        found = pattern.search(text)
+        if found:
+            hop = {"label": found.group(1), "ip": None, "kind": "hop"}
+            egress = (found.group(2) or "").strip() if found.lastindex else ""
+            if egress:
+                hop["via"] = egress
+            return [hop], ("The first hop is the next hop the source's own "
+                           "routing named; no traceroute was run in that "
+                           "context, so the rest is not shown.")
+    return [], ""
 
 
 def _trace_settled(checks, src_label, dst_label, dest_addr):
