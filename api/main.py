@@ -447,6 +447,14 @@ async def run_turn(sess: Session, text: str, show_commands=False):
              and not wf.local
              and not wf.cmdb_miss)
 
+    # A deeper-checks turn that ended INCONCLUSIVE has not finished the job --
+    # the ladder is long and a model may stop partway down it. Offer to carry
+    # on from where it got to, rather than leaving the operator with a report
+    # that says "unresolved" and no way forward but starting again.
+    if show_commands and wf.scope == "path" and not wf.cmdb_miss:
+        verdict = str((wf.deep_report or {}).get("result") or "").upper()
+        offer = verdict != "REACHABLE"
+
     await sess.status("idle")
     await sess.send({"type": "final", "answer": str(answer),
                      "report": parsed, "offer_deep": offer,

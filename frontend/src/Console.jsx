@@ -533,7 +533,9 @@ function Report({ final, busy, deepRunning, cmdbMiss, alerts, paths, onDeep }) {
                 </p>
                 {final.offerDeep && !busy && (
                   <button className="deep-btn" onClick={onDeep}>
-                    🔎 Run deeper checks
+                    {/* after a deep turn that settled nothing, the same button
+                        carries on down the ladder rather than starting over */}
+                    🔎 {final.isDeep ? "Continue deeper checks" : "Run deeper checks"}
                   </button>
                 )}
               </div>
