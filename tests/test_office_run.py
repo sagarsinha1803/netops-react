@@ -251,6 +251,90 @@ check("a routed chain with NO verdict is unsettled, not a success",
 check("so it ends in a question", unsettled["nodes"][-1]["label"] == "?",
       unsettled["line"][-20:])
 
+
+# ---- 6. the deeper checks' own probes settle the deep path -----------------
+# A run found the destination in a VRF, pinged it there, got 3/3 replies -- and
+# the panel still drew "? unconfirmed" and called the result INCONCLUSIVE,
+# because the deep path was built only from routing output. A probe that comes
+# back IS the answer.
+DEST = "198.51.100.31"
+
+vrf_ping = {
+    "cmd": f"ping vrf EXAMPLE-VRF {DEST} count 3",
+    "output": (f"# ping vrf EXAMPLE-VRF {DEST} count 3\n"
+               f"Type escape sequence to abort.\n"
+               f"Sending 3, 100-byte ICMP Echos to {DEST}, timeout is 2 seconds:\n"
+               "!!!\n"
+               "Success rate is 100 percent (3/3), round-trip min/avg/max = 2/2/3 ms"),
+}
+route_only = {
+    "cmd": "show route " + DEST,
+    "output": ("Routing entry for 0.0.0.0/0\n"
+               "  Known via \"ospf 1\"\n"
+               "  Routing Descriptor Blocks\n"
+               "    203.0.113.2, from 203.0.113.2, via Bundle-Ether9\n"),
+}
+
+settled = path_from_checks([route_only, vrf_ping], "EDGE-A1", "EDGE-B2", DEST)
+check("a successful VRF ping settles the deep path",
+      settled["reached"] is True, str(settled["reached"]))
+check("and draws through to the destination",
+      settled["nodes"][-1]["label"] == "EDGE-B2", settled["line"])
+check("the note names the VRF it took, because that IS the finding",
+      "EXAMPLE-VRF" in settled["note"], settled["note"][:90])
+check("and says the earlier failure was the wrong context",
+      "wrong routing context" in settled["note"], settled["note"][-60:])
+
+# a ping to the NEXT HOP is not a ping to the destination
+next_hop_ping = {
+    "cmd": "ping 203.0.113.2 count 3",
+    "output": ("# ping 203.0.113.2 count 3\n!!!\n"
+               "Success rate is 100 percent (3/3)"),
+}
+not_settled = path_from_checks([route_only, next_hop_ping],
+                               "EDGE-A1", "EDGE-B2", DEST)
+check("a next-hop ping does NOT claim the destination was reached",
+      not_settled["reached"] is not True, str(not_settled["reached"]))
+
+# a FAILED ping to the destination must not be read as success either
+failed_ping = {
+    "cmd": f"ping {DEST} count 3",
+    "output": (f"# ping {DEST} count 3\n...\n"
+               "Success rate is 0 percent (0/3)"),
+}
+still_open = path_from_checks([route_only, failed_ping],
+                              "EDGE-A1", "EDGE-B2", DEST)
+check("a failed ping settles nothing on its own",
+      still_open["reached"] is not True, str(still_open["reached"]))
+
+# ---- a silent hop between answering hops is not a break --------------------
+trace = {
+    "cmd": f"traceroute vrf EXAMPLE-VRF {DEST} maxttl 5 timeout 1 probe 1",
+    "output": (f"# traceroute vrf EXAMPLE-VRF {DEST}\n"
+               f"Tracing the route to {DEST}\n"
+               " 1  203.0.113.2 [MPLS: Label 90001 Exp 0] 2 msec\n"
+               " 2  203.0.113.78 [MPLS: Label 90002 Exp 0] 2 msec\n"
+               " 3  * \n"
+               " 4  203.0.113.202 3 msec\n"),
+}
+traced = path_from_checks([route_only, trace], "EDGE-A1", "EDGE-B2", DEST)
+check("a traceroute the deeper checks ran is used for the path",
+      "203.0.113.78" in traced["line"], traced["line"])
+check("a hop that answered nothing between hops that did is a HIDDEN hop",
+      "hidden hop" in traced["line"], traced["line"])
+check("it is not drawn as a wall",
+      "blocked" not in traced["line"] and "X" not in traced["nodes"][-1]["label"],
+      traced["line"])
+check("and the note says why silence there is not a drop",
+      "declining to reply" in traced["note"], traced["note"][:110])
+check("the trace alone still does not claim arrival",
+      traced["reached"] is None, str(traced["reached"]))
+
+# a probe beats a trace: both present, the probe wins
+both = path_from_checks([route_only, trace, vrf_ping], "EDGE-A1", "EDGE-B2", DEST)
+check("a probe that answered outranks a trace that did not",
+      both["reached"] is True, str(both["reached"]))
+
 print()
 print("ALL PASSED" if not fails else f"FAILED ({len(fails)}): {fails}")
 sys.exit(1 if fails else 0)

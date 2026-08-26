@@ -833,14 +833,122 @@ _ARP_RESOLVED = re.compile(
 _IF_UP = re.compile(r"^\s*\S+\s+is\s+up,\s*line protocol is up", re.I | re.M)
 
 
-def path_from_checks(checks, src_label="source", dst_label="destination"):
-    """What the deeper checks established about the next hop.
+def _probe_settled(checks, src_label, dst_label, dest_addr):
+    """A path built from a PROBE the deeper checks ran, or None.
 
-    Not a traceroute: it is the source's own answer to "and then what?", which
-    is the question a trace full of stars leaves open. A next hop that never
-    resolved in ARP, or an egress interface that is down, ends the path HERE --
-    and says why, which no traceroute can.
+    The deeper checks are not limited to reading tables. When one of them pings
+    the destination and gets replies -- in a VRF, in an MPLS L3VPN, from a
+    different source interface -- that is not evidence about the path, it IS
+    the answer: packets went and came back. Reading only the routing output
+    ignored the strongest result in the run, and a turn whose own report said
+    "3/3 replies" still drew "? unconfirmed".
     """
+    target = str(dest_addr or "").strip()
+    for check in reversed(checks or []):            # the most recent wins
+        cmd = str(check.get("cmd") or "")
+        out = str(check.get("output") or "")
+        if not re.match(r"^\s*(execute\s+)?ping\b", cmd, re.I):
+            continue
+        if target and target not in cmd:            # a next-hop ping, not this
+            continue
+        if not check_ok(out) or not usable_output(out, cmd):
+            continue
+        context = ""
+        vrf = re.search(r"\bvrf\s+(\S+)", cmd, re.I)
+        if vrf:
+            context = f" in VRF {vrf.group(1)}"
+        nodes = [{"label": src_label, "ip": None, "kind": "source"},
+                 {"label": dst_label, "ip": None, "kind": "dest"}]
+        return {"nodes": nodes, "line": _line(nodes), "reached": True,
+                "note": (f"A ping run during the deeper checks{context} "
+                         f"reached the destination and got replies. That "
+                         f"settles reachability: the earlier failure was the "
+                         f"wrong routing context, not a broken path.")}
+    return None
+
+
+def _trace_settled(checks, src_label, dst_label, dest_addr):
+    """A path built from a traceroute the deeper checks ran, or None.
+
+    A hop that answers nothing BETWEEN hops that do is a device declining to
+    reply -- MPLS transit routinely does -- not a break. Drawing it as the end
+    of the path blames a hop that forwarded the packet perfectly well.
+    """
+    from agent import vendors
+    for check in reversed(checks or []):
+        cmd = str(check.get("cmd") or "")
+        out = str(check.get("output") or "")
+        if not re.match(r"^\s*(traceroute|tracert|tracepath)\b", cmd, re.I):
+            continue
+        hops = vendors.parse_hops(out)
+        if not hops:
+            continue
+        last_answer = max((i for i, h in enumerate(hops)
+                           if not h.get("timeout")), default=-1)
+        if last_answer < 0:
+            continue
+        nodes = [{"label": src_label, "ip": None, "kind": "source"}]
+        hidden = 0
+        for hop in hops[:last_answer + 1]:
+            if hop.get("timeout"):
+                hidden += 1
+                nodes.append({"label": "hidden hop", "ip": None,
+                              "kind": "unknown"})
+                continue
+            label = str(hop.get("host") or hop.get("ip") or "")
+            if not label or label == dst_label or label == str(dest_addr):
+                continue
+            nodes.append({"label": label, "ip": None, "kind": "hop"})
+
+        arrived = bool(dest_addr) and any(
+            str(h.get("ip") or h.get("host")) == str(dest_addr)
+            for h in hops if not h.get("timeout"))
+        trailing = len(hops) - 1 - last_answer
+        if arrived:
+            nodes.append({"label": dst_label, "ip": None, "kind": "dest"})
+            reached = True
+        elif trailing:
+            nodes.append({"label": "?", "ip": None, "kind": "unknown"})
+            reached = None
+        else:
+            nodes.append({"label": "?", "ip": None, "kind": "unknown"})
+            reached = None
+
+        note = "From a traceroute the deeper checks ran"
+        vrf = re.search(r"\bvrf\s+(\S+)", cmd, re.I)
+        if vrf:
+            note += f", inside VRF {vrf.group(1)}"
+        note += ". "
+        if hidden:
+            note += (f"{hidden} hop(s) answered nothing while later ones did: "
+                     f"that is a device declining to reply, not a break. ")
+        if not arrived and trailing:
+            note += ("It stops before the destination answers, so what happens "
+                     "past the last replying hop is unsettled.")
+        elif arrived:
+            note += "The destination answered."
+        return {"nodes": nodes, "line": _line(nodes), "reached": reached,
+                "note": note.strip()}
+    return None
+
+
+def path_from_checks(checks, src_label="source", dst_label="destination",
+                     dest_addr=""):
+    """What the deeper checks established about the route.
+
+    In order of what each kind of evidence is worth: a probe that reached the
+    destination settles it; a traceroute the checks ran shows the route they
+    took; and failing both, the source's own forwarding table says what it
+    INTENDS to do next, which is the question a trace full of stars leaves
+    open.
+    """
+    settled = _probe_settled(checks, src_label, dst_label, dest_addr)
+    if settled:
+        return settled
+    traced = _trace_settled(checks, src_label, dst_label, dest_addr)
+    if traced:
+        return traced
+
     text = "\n".join(str(c.get("output") or "") for c in (checks or []))
     if not text.strip():
         return None

@@ -451,9 +451,15 @@ function AlertsTable({ alerts }) {
 
 function Report({ final, busy, deepRunning, cmdbMiss, alerts, paths, onDeep }) {
   const rep = final.report || {};
-  const verdict = rep.result || (rep.text || final.answer ? "ANSWER" : "?");
-  const cls = verdictClass(rep.result);
-  const showVerdict = rep.result || rep.ping;
+  // The deeper checks SUPERSEDE the first pass -- that is what they are for.
+  // Leaving the banner on the earlier verdict meant a run whose escalation
+  // proved the destination reachable still read "not reachable" at the top,
+  // with the proof three tabs away.
+  const deep = final.deepReport || {};
+  const latest = deep.result ? deep : rep;
+  const verdict = latest.result || (rep.text || final.answer ? "ANSWER" : "?");
+  const cls = verdictClass(latest.result);
+  const showVerdict = latest.result || latest.ping || rep.ping;
   const isSchema = !!(rep.source || rep.destination || rep.result);
   const [tab, setTab] = useState("report");
 
@@ -482,7 +488,14 @@ function Report({ final, busy, deepRunning, cmdbMiss, alerts, paths, onDeep }) {
       {showVerdict && (
         <div className={`verdict-bar ${cls}`}>
           {cls === "ok" ? "✓" : cls === "bad" ? "✕" : "!"} {String(verdict)}
-          {rep.ping && <span className="sub">ping {String(rep.ping).toLowerCase()}</span>}
+          {(latest.ping || rep.ping) && (
+            <span className="sub">
+              ping {String(latest.ping || rep.ping).toLowerCase()}
+              {deep.result && deep.result !== rep.result
+                ? " · revised by the deeper checks"
+                : ""}
+            </span>
+          )}
         </div>
       )}
       <div className="report-tabs">
