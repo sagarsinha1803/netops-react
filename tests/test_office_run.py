@@ -436,24 +436,32 @@ from agent.prompts import DEEP_CHECK_PROMPT as LADDER               # noqa: E402
 
 for rule, why in [
     ("YOUR JOB IS THE PATH", "the job is the route, not just the fault"),
+    ("SEARCH EVERY TABLE", "one table is not every table"),
+    ("NAME THE BLOCKAGE", "where and why, not 'unreachable'"),
     ("RESOLVE RECURSIVELY", "a next hop is itself reached through a route"),
     ("EQUAL COST", "several next hops must all be named, not one picked"),
-    ("show mpls forwarding-table", "the label stack IS the path in an L3VPN"),
-    ("show lldp neighbors", "the neighbour names the hop when a trace cannot"),
-    ("source <intf>", "the source address changes which route is tested"),
     ("REPORT THE PATH", "the hop list must be what was actually proved"),
-    ("VRF-Name", "a column header was once read as the name of a VRF"),
-    ("show ip route vrf all", "listing VRFs and stopping answers nothing"),
-    ("management VRF", "a management address is not reachable from the "
-                       "default table, and that is not a fault"),
-    ("show forwarding ipv4 route", "the hardware table is the authority"),
-    ("show cdp neighbors", "who the neighbour is, rather than assuming"),
-    ("mac address-table", "empty is NORMAL on a routed interface"),
+    ("DERIVING THE SYNTAX", "the model works the command out for the platform "
+                            "in front of it, rather than being handed a list"),
+    ("A REJECTION IS INFORMATION", "a refused command is a syntax correction"),
+    ("vpn-instance", "a routing context has a different name on every vendor"),
+    ("route-domain", "and the list has to reach past the common three"),
+    ("neighbour discovery protocol", "who the neighbour is, rather than "
+                                     "assuming"),
+    ("switching table", "empty is NORMAL on a routed interface"),
     ("HOP 1", "one hop is expected when the two ends are directly connected"),
     ("ARP resolving", "a first probe that fails while the rest succeed"),
-    ("traceroute takes few options", "NX-OS rejects the bounded form"),
+    ("VRF-Name", "a column header was once read as the name of a VRF"),
 ]:
     check(f"the ladder covers: {why}", rule in LADDER, f"missing {rule!r}")
+
+# and it must not go back to naming one vendor's CLI: the estate has
+# platforms nobody listed, and a list is only current on the day it is
+# written
+for banned in ("show ip route", "show cdp neighbors", "display ip routing",
+               "get router info", "show mpls forwarding-table"):
+    check(f"the ladder does not hard-code {banned!r}", banned not in LADDER,
+          "the model derives the syntax from the platform")
 
 
 # ---- 10. two ends on one wire, and where a path stops ----------------------
