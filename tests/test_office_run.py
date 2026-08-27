@@ -455,6 +455,71 @@ for rule, why in [
 ]:
     check(f"the ladder covers: {why}", rule in LADDER, f"missing {rule!r}")
 
+
+# ---- 10. two ends on one wire, and where a path stops ----------------------
+# A directly connected pair has no next hop to chase: the path IS the
+# interface, and that is what should be drawn.
+CONNECTED = [
+    {"cmd": f"show ip route {DEST}",
+     "output": ("198.51.100.28/30, ubest/mbest: 1/0\n"
+                "    *via 198.51.100.30, Ethernet1/54, [0/0], "
+                "directly connected, Ethernet1/54\n")},
+    {"cmd": "show ip arp",
+     "output": f"{DEST}  00:04:54  0050.56be.1111  Ethernet1/54\n"},
+    {"cmd": "show interface Ethernet1/54",
+     "output": "Ethernet1/54 is up, line protocol is up\n"},
+]
+link = path_from_checks(CONNECTED, "EDGE-A1", "EDGE-B2", DEST)
+check("a directly connected pair is drawn through its interface",
+      [n["label"] for n in link["nodes"]]
+      == ["EDGE-A1", "Ethernet1/54", "EDGE-B2"], link["line"])
+check("and counts as reached, since ARP resolved and the link is up",
+      link["reached"] is True, str(link["reached"]))
+check("the note says one hop, no router between",
+      "no router in between" in link["note"], link["note"][:80])
+
+DOWN_LINK = [
+    {"cmd": f"show ip route {DEST}",
+     "output": "198.51.100.28/30 is directly connected, Ethernet1/54\n"},
+    {"cmd": "show interface Ethernet1/54",
+     "output": "Ethernet1/54 is down, line protocol is down\n"},
+]
+broken_link = path_from_checks(DOWN_LINK, "EDGE-A1", "EDGE-B2", DEST)
+check("a dead link still shows the interface, then stops there",
+      [n["label"] for n in broken_link["nodes"]]
+      == ["EDGE-A1", "Ethernet1/54", "X"], broken_link["line"])
+check("and the stopping point carries the reason",
+      broken_link["nodes"][-1].get("why") == "Ethernet1/54 is down",
+      str(broken_link["nodes"][-1]))
+
+# ---- the blockage is named, in the words that identify it ------------------
+from api.workflow import blockage                                  # noqa: E402
+
+ROUTE = ("Routing entry for 198.51.100.31/32\n"
+         "    203.0.113.2, from 203.0.113.2, via Bundle-Ether9\n")
+cases = [
+    ("an interface down beats every other reason",
+     ROUTE + "Bundle-Ether9 is down, line protocol is down\n",
+     "Bundle-Ether9 is down"),
+    ("an unresolved next hop is named with its address",
+     ROUTE + "203.0.113.2  -  Incomplete  ARPA  Bundle-Ether9\n",
+     "203.0.113.2 never answered ARP"),
+    ("a drop adjacency is called what it is",
+     ROUTE + "  via 203.0.113.2, Bundle-Ether9 (INCOMPLETE - drop adjacency)\n",
+     "drop adjacency"),
+]
+for name, text, want in cases:
+    got = blockage(text, "203.0.113.2", "Bundle-Ether9")
+    check(name, want in got, f"got {got!r}")
+
+check("no route anywhere is only claimed when there is no next hop either",
+      "no route" in blockage("% Network not in table\nRoute not found\n"),
+      blockage("% Network not in table"))
+check("a healthy run names no blockage at all",
+      blockage(ROUTE + "Bundle-Ether9 is up, line protocol is up\n",
+               "203.0.113.2", "Bundle-Ether9") == "",
+      "a reason invented for a working path is worse than none")
+
 print()
 print("ALL PASSED" if not fails else f"FAILED ({len(fails)}): {fails}")
 sys.exit(1 if fails else 0)

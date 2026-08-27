@@ -839,6 +839,114 @@ _ARP_RESOLVED = re.compile(
 _IF_UP = re.compile(r"^\s*\S+\s+is\s+up,\s*line protocol is up", re.I | re.M)
 
 
+
+# "directly connected" / "attached", however the platform spells it: the two
+# ends share a subnet and the path between them IS the interface
+_CONNECTED = re.compile(
+    # "is directly connected" must not match BEFORE the form that names the
+    # interface, or the interface is lost and the path cannot be drawn
+    r"(?:is\s+)?directly\s+connected(?:\s*,\s*([A-Za-z][\w./:-]*\d[\w./:-]*))?"
+    r"|\battached\b(?:\s*,\s*([A-Za-z][\w./:-]*\d[\w./:-]*))?", re.I)
+
+
+# a route lookup that found nothing, in the words each platform uses
+_NO_ROUTE = re.compile(
+    r"%?\s*network not in table"
+    r"|route not found"
+    r"|no route to host"
+    r"|no longest match"
+    r"|%\s*network not found"
+    r"|not in (?:the )?(?:routing|forwarding) table", re.I)
+
+# a forwarding entry that exists but cannot be used
+_FIB_BROKEN = re.compile(
+    r"incomplete\s*-?\s*drop adjacency|drop adjacency|punt adjacency"
+    r"|adjacency\s+incomplete|glean adjacency", re.I)
+
+
+def blockage(text, next_hop="", egress=""):
+    """The exact reason nothing gets through, in a few words, or "".
+
+    Ordered by how close the fault is to the source, because that is the order
+    an engineer wants it: a dead interface is a more useful answer than "the
+    next hop did not answer", and both beat "no route".
+    """
+    if egress and _IF_DOWN.search(text):
+        for found in _IF_DOWN.finditer(text):
+            name = found.group(1)
+            if egress.lower() in name.lower() or name.lower() in egress.lower():
+                return f"{name} is down"
+    # "incomplete" appears in BOTH an unresolved ARP entry and a CEF drop
+    # adjacency, and they are different findings: decide by the line it is on,
+    # not by the word appearing somewhere in the output
+    for line in text.splitlines():
+        if not _ARP_INCOMPLETE.search(line):
+            continue
+        if re.search(r"arpa|arp|neighbou?r", line, re.I):
+            return (f"{next_hop} never answered ARP" if next_hop
+                    else "the next hop never answered ARP")
+    if _FIB_BROKEN.search(text):
+        return "the forwarding entry is a drop adjacency"
+    if _ARP_INCOMPLETE.search(text):
+        return (f"{next_hop} never answered ARP" if next_hop
+                else "the next hop never answered ARP")
+    if _NO_ROUTE.search(text) and not next_hop:
+        return "no route to the destination in any table checked"
+    return ""
+
+
+def _connected_path(checks, src_label, dst_label, dest_addr):
+    """A path for two ends that share a subnet: source, interface, destination.
+
+    There is no next hop to chase here. The path IS the link, and what proves
+    it is the interface state, the ARP entry and the neighbour on the far end
+    -- so that is what gets drawn and what gets said.
+    """
+    text = "\n".join(str(c.get("output") or "") for c in (checks or []))
+    found = _CONNECTED.search(text)
+    if not found:
+        return None
+    intf = next((g for g in found.groups() if g), "")
+    if not intf:                                  # the interface named nearby
+        near = re.search(r"via\s+([A-Za-z][\w./:-]*\d[\w./:-]*)", text, re.I)
+        intf = near.group(1) if near else ""
+    if not intf:
+        return None
+
+    down = any(intf.lower() in m.group(1).lower()
+               or m.group(1).lower() in intf.lower()
+               for m in _IF_DOWN.finditer(text))
+    resolved = bool(_ARP_RESOLVED.search(text))
+    up = bool(_IF_UP.search(text))
+
+    nodes = [{"label": src_label, "ip": None, "kind": "source"},
+             {"label": intf, "ip": None, "kind": "intf"}]
+    if down:
+        nodes.append({"label": "X", "ip": None, "kind": "dead",
+                      "why": f"{intf} is down"})
+        return {"nodes": nodes, "line": _line(nodes), "reached": False,
+                "note": (f"The two ends are directly connected through {intf}, "
+                         f"and that interface is down. There is no next hop to "
+                         f"chase: the link itself is the path, and it is "
+                         f"broken.")}
+
+    nodes.append({"label": dst_label, "ip": None,
+                  "kind": "dest" if (resolved or up) else "unknown"})
+    if resolved or up:
+        note = (f"The two ends are directly connected through {intf}: one hop, "
+                f"no router in between. ")
+        note += ("The ARP entry resolves and the interface is up."
+                 if resolved and up else
+                 "The ARP entry resolves." if resolved else
+                 "The interface is up.")
+        return {"nodes": nodes, "line": _line(nodes), "reached": True,
+                "note": note}
+    nodes[-1] = {"label": "?", "ip": None, "kind": "unknown"}
+    return {"nodes": nodes, "line": _line(nodes), "reached": None,
+            "note": (f"The two ends are directly connected through {intf}, but "
+                     f"nothing here shows the interface up or the neighbour "
+                     f"resolved -- check the interface and the ARP entry.")}
+
 def _probe_settled(checks, src_label, dst_label, dest_addr):
     """A path built from a PROBE the deeper checks ran, or None.
 
@@ -1013,6 +1121,11 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
     settled = _probe_settled(checks, src_label, dst_label, dest_addr)
     if settled:
         return settled
+    # two ends on the same subnet have no next hop to chase: the link is the
+    # path, and drawing a next-hop chain for it would be inventing a router
+    linked = _connected_path(checks, src_label, dst_label, dest_addr)
+    if linked:
+        return linked
     traced = _trace_settled(checks, src_label, dst_label, dest_addr)
     if traced:
         return traced
@@ -1059,7 +1172,8 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
     confirmed = bool(_ARP_RESOLVED.search(text) or _IF_UP.search(text))
 
     if unresolved or broken:
-        nodes.append({"label": "X", "ip": None, "kind": "dead"})
+        nodes.append({"label": "X", "ip": None, "kind": "dead",
+                      "why": blockage(text, next_hop, egress)})
         why = []
         if broken:
             why.append(f"{egress} is down")

@@ -288,7 +288,9 @@ function PathChips({ path, nodes }) {
           : i === 0 || h.kind === "source" ? "src"
           : dead ? "dead" : unknown ? "unk"
           : last || h.kind === "dest" ? "dst" : "";
-        const text = dead ? "✕ blocked"
+        // A bare cross makes the reader open a tab to find out what broke.
+        // When the checks named the blockage, it goes on the chip.
+        const text = dead ? `✕ ${h.why || "blocked"}`
           : label === "?" ? "? unconfirmed"
           : label === "hidden hop" ? "· hidden hop"
           : label;
