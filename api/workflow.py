@@ -373,6 +373,25 @@ class Workflow:
         return {"nodes": nodes, "line": line, "reached": reached,
                 "truncated": died and not reached}
 
+    def dest_addr(self):
+        """The destination's ADDRESS, whatever the user typed.
+
+        Commands are written against addresses; the box has no idea what the
+        CMDB calls it. Comparing a device NAME against a ping command never
+        matches, so a probe that proved reachability was skipped and the
+        destination was mistaken for a transit hop.
+        """
+        typed = str((self.params or {}).get("dest") or "").strip()
+        if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", typed):
+            return typed
+        rows = [r for r in self.basics if r.get("kind") == "cmdb"]
+        for row in reversed(rows):               # the destination is looked up second
+            found = re.search(r"managementIp\"?\s*:\s*\"?(\d{1,3}(?:\.\d{1,3}){3})",
+                              str(row.get("output") or ""))
+            if found:
+                return found.group(1)
+        return typed
+
     def path_source(self):
         """The label the paths should call the source.
 
@@ -963,8 +982,10 @@ def _probe_settled(checks, src_label, dst_label, dest_addr):
         out = str(check.get("output") or "")
         if not re.match(r"^\s*(execute\s+)?ping\b", cmd, re.I):
             continue
-        if target and target not in cmd:            # a next-hop ping, not this
-            continue
+        # the command may name the destination by address or by hostname
+        named = [n for n in (target, dst_label) if n]
+        if named and not any(str(n) in cmd for n in named):
+            continue                                # a next-hop ping, not this
         if not check_ok(out) or not usable_output(out, cmd):
             continue
         vrf = re.search(r"\bvrf\s+(\S+)", cmd, re.I)
@@ -1036,7 +1057,12 @@ def _hops_in_context(checks, vrf, dest_addr):
             egress = (found.group(2) or "").strip() if found.lastindex else ""
             hops = ([{"label": egress, "ip": None, "kind": "intf"}]
                     if egress else [])
-            hops.append({"label": found.group(1), "ip": None, "kind": "hop"})
+            # an ATTACHED route names the destination as its own next hop:
+            # adding it here would draw the destination twice, once as a
+            # transit hop and once as the end of the path
+            if found.group(1) != str(dest_addr):
+                hops.append({"label": found.group(1), "ip": None,
+                             "kind": "hop"})
             return hops, ("The first hop is the next hop the source's own "
                            "routing named; no traceroute was run in that "
                            "context, so the rest is not shown.")
@@ -1161,6 +1187,39 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
     nodes = [{"label": src_label, "ip": None, "kind": "source"}]
     if egress:
         nodes.append({"label": egress, "ip": None, "kind": "intf"})
+
+    # An ATTACHED route names the destination as its own next hop. Drawing that
+    # as a transit hop and then adding "?" says the traffic reaches the
+    # destination and then something unknown happens to it, which cannot be
+    # true: there is nothing after the destination.
+    if dest_addr and next_hop == str(dest_addr):
+        blocked = blockage(text, next_hop, egress)
+        if unresolved or broken:
+            nodes.append({"label": "X", "ip": None, "kind": "dead",
+                          "why": blocked})
+            return {"nodes": nodes, "line": _line(nodes), "reached": False,
+                    "note": (f"The destination is directly attached out "
+                             f"{egress or 'this interface'} -- it is its own "
+                             f"next hop, so there is no router in between. "
+                             f"{blocked[:1].upper() + blocked[1:]}."
+                             if blocked else
+                             "The destination is directly attached, and the "
+                             "link to it is down.")}
+        reached = bool(_ARP_RESOLVED.search(text) or _IF_UP.search(text))
+        nodes.append({"label": dst_label, "ip": None,
+                      "kind": "dest" if reached else "unknown"})
+        return {"nodes": nodes, "line": _line(nodes),
+                "reached": True if reached else None,
+                "note": (f"The destination is directly attached out "
+                         f"{egress or 'this interface'}: it is its own next "
+                         f"hop, so the path is one link with no router in "
+                         f"between. "
+                         + ("The interface is up and the neighbour resolves."
+                            if reached else
+                            "Nothing here shows that link up or the neighbour "
+                            "resolved -- check the interface and the address "
+                            "resolution entry."))}
+
     nodes.append({"label": next_hop, "ip": None, "kind": "hop"})
 
     # Absence of evidence is not evidence: a route pointing somewhere says

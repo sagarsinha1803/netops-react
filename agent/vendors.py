@@ -88,9 +88,18 @@ def ping_ok(out: str) -> bool:
     return False
 
 
+# A hop and its answer are on ONE line. This used \s+, and \s matches a
+# NEWLINE: a bare "  1" followed by the banner "traceroute to <dst> (<dst>),
+# 30 hops max" was read as hop 1 whose host is the destination -- so a
+# traceroute that went nowhere drew the destination as a hop it had reached.
 _HOP_RE = re.compile(
-    r"^\s*(\d+)\s+(.*)$",            # "  3  FW-01 (10.0.0.1) 4 msec" | "  4  *  *  *"
+    r"^[ \t]*(\d+)[ \t]*([^\n]*)$",  # "  3  FW-01 (10.0.0.1) 4 msec" | "  4  *  *  *"
     re.M)
+# what a traceroute prints ABOUT itself. These are not hops, and one of them
+# carries the destination address, which is exactly the wrong thing to believe.
+_TRACE_BANNER = re.compile(
+    r"^(traceroute to|tracing the route|type escape sequence|no route to host)",
+    re.I)
 _IP_RE = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b")
 _NAME_RE = re.compile(r"^([A-Za-z][\w.\-]*)\s*\(")   # "NAME (1.2.3.4)"
 _NAME_BRACKET = re.compile(r"\b([A-Za-z][\w.\-]*)\s*\[")  # windows "name [1.2.3.4]"
@@ -107,6 +116,8 @@ def parse_hops(out: str):
     hops = []
     for m in _HOP_RE.finditer(out or ""):
         n, rest = int(m.group(1)), m.group(2).strip()
+        if _TRACE_BANNER.match(rest):
+            continue                 # the trace talking about itself, not a hop
         if (not rest or set(rest.replace(" ", "")) <= {"*"}
                 or "request timed out" in rest.lower()
                 or rest.split()[0] == "*"):

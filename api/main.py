@@ -431,8 +431,7 @@ async def run_turn(sess: Session, text: str, show_commands=False):
             # the deeper checks answer the question a trace full of stars
             # leaves open: where does the source think this goes next
             wf.set_path("deep", path_from_checks(
-                wf.checks, wf.path_source(), wf.path_dest(),
-                str((wf.params or {}).get("dest") or "")))
+                wf.checks, wf.path_source(), wf.path_dest(), wf.dest_addr()))
         else:
             wf.report = parsed
     await sess.push_wf()

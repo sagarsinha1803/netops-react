@@ -18,8 +18,8 @@ from langchain_core.messages import (AIMessage, HumanMessage,     # noqa: E402
 
 from agent.llm.clipboard_llm import _recap                        # noqa: E402
 from agent.utils import tool_text                                 # noqa: E402
-from api.workflow import (as_report, check_ok, cmdb_record,       # noqa: E402
-                          failed_line, usable_output)
+from api.workflow import (Workflow, as_report, check_ok,          # noqa: E402
+                          cmdb_record, failed_line, usable_output)
 
 fails = []
 
@@ -527,6 +527,100 @@ check("a healthy run names no blockage at all",
       blockage(ROUTE + "Bundle-Ether9 is up, line protocol is up\n",
                "203.0.113.2", "Bundle-Ether9") == "",
       "a reason invented for a working path is worse than none")
+
+
+# ---- 11. the destination is not a hop it reached ---------------------------
+# A traceroute that went NOWHERE drew the destination as hop 1 and then a
+# wall: "source -> destination -> blocked", which cannot be true. The hop
+# pattern used \s+, and \s matches a NEWLINE, so a bare " 1" joined the
+# banner line under it and the banner carries the destination address.
+FAILED_TRACE = "\n".join([
+    f"# traceroute {DEST}",
+    " 1",
+    f"traceroute to {DEST} ({DEST}), 30 hops max, 48 byte packets",
+    f"No route to host {DEST} in this vrf",
+])
+hops = parse_hops(FAILED_TRACE)
+check("a trace that went nowhere yields no reached hop",
+      all(h["timeout"] for h in hops), str(hops))
+check("and never takes the destination out of the banner line",
+      not any(h["host"] == DEST for h in hops), str(hops))
+
+REAL_TRACE = "\n".join([
+    f"traceroute to {DEST} ({DEST}), 30 hops max, 40 byte packets",
+    " 1  203.0.113.2  1.02 ms  0.98 ms  1.01 ms",
+    " 2  * * *",
+    f" 3  {DEST}  2.10 ms  2.00 ms  2.05 ms",
+])
+real = parse_hops(REAL_TRACE)
+check("a real trace still parses, banner and all",
+      [h["host"] or "*" for h in real] == ["203.0.113.2", "*", DEST],
+      str([h["host"] or "*" for h in real]))
+
+ONE_HOP = "\n".join([
+    f"traceroute to {DEST} ({DEST}), 30 hops max, 40 byte packets",
+    f" 1  {DEST}  0.604 ms  0.432 ms  0.418 ms",
+])
+check("a genuine one-hop trace is not mistaken for the banner bug",
+      [h["host"] for h in parse_hops(ONE_HOP)] == [DEST],
+      str(parse_hops(ONE_HOP)))
+
+
+# ---- 12. an attached route: the destination is its own next hop ------------
+# The deep path drew "source -> mgmt0 -> destination -> ? unconfirmed", which
+# reads as the traffic arriving and then something unknown happening to it.
+ATTACHED = {
+    "cmd": f"show ip route {DEST} vrf management",
+    "output": (f"IP Route Table for VRF \"management\"\n"
+               f"{DEST}/32, ubest/mbest: 1/0, attached\n"
+               f"    *via {DEST}, mgmt0, [250/0], 01:36:17, am\n"),
+}
+VRF_PING = {
+    "cmd": f"ping {DEST} vrf management count 3",
+    "output": (f"64 bytes from {DEST}: icmp_seq=0 ttl=254 time=0.713 ms\n"
+               f"3 packets transmitted, 3 packets received, 0.00% packet loss\n"),
+}
+LINK_DOWN = {"cmd": "show interface mgmt0",
+             "output": "mgmt0 is down, line protocol is down\n"}
+
+proved = path_from_checks([ATTACHED, VRF_PING], "EDGE-A1", "EDGE-B2", DEST)
+check("an attached destination ends the path -- nothing comes after it",
+      [n["label"] for n in proved["nodes"]] == ["EDGE-A1", "mgmt0", "EDGE-B2"],
+      proved["line"])
+check("and the probe settles it",
+      proved["reached"] is True, str(proved["reached"]))
+
+unproved = path_from_checks([ATTACHED], "EDGE-A1", "EDGE-B2", DEST)
+check("with no probe it is still the destination, not a mystery hop",
+      [n["label"] for n in unproved["nodes"]]
+      == ["EDGE-A1", "mgmt0", "EDGE-B2"], unproved["line"])
+check("but it is not claimed as reached",
+      unproved["reached"] is None, str(unproved["reached"]))
+check("and the note explains what attached means",
+      "its own next hop" in unproved["note"], unproved["note"][:90])
+
+dead = path_from_checks([ATTACHED, LINK_DOWN], "EDGE-A1", "EDGE-B2", DEST)
+check("an attached destination behind a dead link stops at the link",
+      [n["label"] for n in dead["nodes"]] == ["EDGE-A1", "mgmt0", "X"],
+      dead["line"])
+check("naming the interface as the blockage",
+      dead["nodes"][-1].get("why") == "mgmt0 is down",
+      str(dead["nodes"][-1]))
+
+# the destination's ADDRESS is what commands use, whatever the user typed
+wf = Workflow()
+wf.reset({"source": "EDGE-A1", "dest": "EDGE-B2"})
+wf.add_basic("get_device_details(EDGE-A1)", kind="cmdb")
+wf.finish_basic(0, True, output=json.dumps(
+    {"data": {"name": "EDGE-A1", "managementIp": "198.51.100.27"}}))
+wf.add_basic("get_device_details(EDGE-B2)", kind="cmdb")
+wf.finish_basic(1, True, output=json.dumps(
+    {"data": {"name": "EDGE-B2", "managementIp": DEST}}))
+check("a destination typed as a NAME resolves to its address",
+      wf.dest_addr() == DEST, wf.dest_addr())
+wf.reset({"source": "198.51.100.27", "dest": DEST})
+check("and an address typed directly is left alone",
+      wf.dest_addr() == DEST, wf.dest_addr())
 
 print()
 print("ALL PASSED" if not fails else f"FAILED ({len(fails)}): {fails}")
