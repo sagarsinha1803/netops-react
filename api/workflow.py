@@ -766,9 +766,15 @@ def path_from_policy(body, src_label="source", dst_label="destination"):
                  if n.lower() not in ends and n.upper() not in _NOT_A_DEVICE]
         if not names:
             continue
-        # two devices in one step are ALTERNATIVES, not a sequence: equal-cost
-        # next hops that rejoin. Sequencing them invents a route through both.
-        nodes.append({"label": " / ".join(names), "ip": None, "kind": "hop"})
+        # One chip per device, in the order SecureTrack walked them. Equal-cost
+        # alternatives used to be crammed into a single "A / B" chip: accurate
+        # about the topology, unreadable as a path. They are laid out in
+        # sequence now and MARKED as alternatives instead of run together.
+        for i, name in enumerate(names):
+            node = {"label": name, "ip": None, "kind": "hop"}
+            if len(names) > 1:
+                node["alt"] = f"{i + 1} of {len(names)} at this step"
+            nodes.append(node)
     if reached is True:
         nodes.append({"label": dst_label, "ip": None, "kind": "dest"})
     elif reached is False:
@@ -919,11 +925,11 @@ def _hops_in_context(checks, vrf, dest_addr):
     for pattern in _NEXT_HOP:
         found = pattern.search(text)
         if found:
-            hop = {"label": found.group(1), "ip": None, "kind": "hop"}
             egress = (found.group(2) or "").strip() if found.lastindex else ""
-            if egress:
-                hop["via"] = egress
-            return [hop], ("The first hop is the next hop the source's own "
+            hops = ([{"label": egress, "ip": None, "kind": "intf"}]
+                    if egress else [])
+            hops.append({"label": found.group(1), "ip": None, "kind": "hop"})
+            return hops, ("The first hop is the next hop the source's own "
                            "routing named; no traceroute was run in that "
                            "context, so the rest is not shown.")
     return [], ""
@@ -1035,10 +1041,14 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
     broken = bool(egress) and any(
         egress.lower() in d.lower() or d.lower() in egress.lower() for d in down)
 
-    hop = {"label": next_hop, "ip": None, "kind": "hop"}
+    # The interface the traffic leaves by is a step in the path, not a footnote
+    # on the next hop: "source -> Ethernet1/54 -> next hop" is how an engineer
+    # draws it, and the interface is usually the thing that turns out to be
+    # down.
+    nodes = [{"label": src_label, "ip": None, "kind": "source"}]
     if egress:
-        hop["via"] = egress
-    nodes = [{"label": src_label, "ip": None, "kind": "source"}, hop]
+        nodes.append({"label": egress, "ip": None, "kind": "intf"})
+    nodes.append({"label": next_hop, "ip": None, "kind": "hop"})
 
     # Absence of evidence is not evidence: a route pointing somewhere says
     # what the source INTENDS, not that anything arrives. Only an ARP entry

@@ -264,25 +264,40 @@ function verdictClass(result) {
   return "warn";
 }
 
-function PathChips({ path }) {
-  const hops = Array.isArray(path) ? path : path ? [path] : [];
+function PathChips({ path, nodes }) {
+  // `nodes` carries what each step IS -- a device, the interface it leaves by,
+  // silence, a wall. `path` is the older plain-string form, still used by the
+  // report's own path field.
+  const hops = nodes && nodes.length
+    ? nodes
+    : (Array.isArray(path) ? path : path ? [path] : []).map((h) => ({
+        label: String(h),
+        kind: String(h).trim() === "X" ? "dead" : "hop",
+      }));
   if (!hops.length) return null;
   return (
     <div className="pathchips">
       {hops.map((h, i) => {
         const last = i === hops.length - 1;
-        const label = String(h).trim();
-        const dead = label === "X";
+        const label = String(h.label ?? h).trim();
+        const dead = label === "X" || h.kind === "dead";
         // "?" is not a device: it is the checks reaching the end of what they
         // can prove. Drawing it as a hop would claim the path continues there.
-        const unknown = label === "?";
-        const cls = i === 0 ? "src" : dead ? "dead"
-          : unknown ? "unk" : last ? "dst" : "";
+        const unknown = label === "?" || h.kind === "unknown";
+        const cls = h.kind === "intf" ? "intf"
+          : i === 0 || h.kind === "source" ? "src"
+          : dead ? "dead" : unknown ? "unk"
+          : last || h.kind === "dest" ? "dst" : "";
+        const text = dead ? "✕ blocked"
+          : label === "?" ? "? unconfirmed"
+          : label === "hidden hop" ? "· hidden hop"
+          : label;
         return (
           <React.Fragment key={i}>
             {i > 0 && <span className="sep">▸</span>}
-            <span className={`hop mono ${cls}`}>
-              {dead ? "✕ blocked" : unknown ? "? unconfirmed" : label}
+            <span className={`hop mono ${cls}`} title={h.alt || ""}>
+              {text}
+              {h.alt && <span className="altmark">alt</span>}
             </span>
           </React.Fragment>
         );
@@ -322,8 +337,10 @@ function PathViews({ paths, fallback, verdictClass }) {
     <div className="pathviews">
       {have.map((v) => {
         const p = paths[v.key];
-        const labels = (p.nodes || []).map((n) =>
-          n.label + (n.ip ? ` (${n.ip})` : "") + (n.via ? ` via ${n.via}` : ""));
+        const nodes = (p.nodes || []).map((n) => ({
+          ...n,
+          label: n.label + (n.ip ? ` (${n.ip})` : ""),
+        }));
         return (
           <div className="pathview" key={v.key}>
             <div className="ph">
@@ -332,7 +349,7 @@ function PathViews({ paths, fallback, verdictClass }) {
                 : p.reached === false ? "bad" : "warn"}`}>{v.label}</span>
               <span className="ps">{v.sub}</span>
             </div>
-            <PathChips path={labels} />
+            <PathChips nodes={nodes} />
             {p.note && <div className="hint pn">{p.note}</div>}
           </div>
         );

@@ -383,6 +383,71 @@ check("with no routing evidence it is still REACHED",
 check("and says the hops are not shown rather than inventing them",
       "not shown" in bare["note"], bare["note"][-90:])
 
+
+# ---- 8. the shape of a path ------------------------------------------------
+# Equal-cost devices were crammed into one "A / B" chip: right about the
+# topology, unreadable as a path. And the interface the traffic leaves by is a
+# step in the route, not a footnote on the next hop -- it is usually the thing
+# that turns out to be down.
+SEQ = json.dumps({
+    "verdict": "ALLOWED", "reaches_destination": True, "unrouted_elements": [],
+    "hops": [["SW-A1", "SW-A2"], ["FW-EDGE-01"], ["CORE-01"]],
+})
+seq = path_from_policy(SEQ, "EDGE-A1", "EDGE-B2")
+labels = [n["label"] for n in seq["nodes"]]
+check("equal-cost devices are laid out in sequence, not run together",
+      "SW-A1 / SW-A2" not in seq["line"] and "SW-A1" in labels
+      and "SW-A2" in labels, seq["line"])
+check("every device gets its own step",
+      labels == ["EDGE-A1", "SW-A1", "SW-A2", "FW-EDGE-01", "CORE-01",
+                 "EDGE-B2"], str(labels))
+check("alternatives are still MARKED as alternatives, not passed off as a chain",
+      [n.get("alt") for n in seq["nodes"] if n["label"] == "SW-A1"]
+      == ["1 of 2 at this step"], str([n.get("alt") for n in seq["nodes"]]))
+check("a device that has no alternative carries no mark",
+      not any(n.get("alt") for n in seq["nodes"] if n["label"] == "FW-EDGE-01"))
+
+WITH_INTF = "\n".join([
+    "Routing entry for 198.51.100.31/32",
+    "  Routing Descriptor Blocks",
+    "    203.0.113.2, from 203.0.113.2, via Ethernet1/54",
+])
+via = path_from_checks([{"cmd": "show ip route", "output": WITH_INTF}],
+                       "EDGE-A1", "EDGE-B2", "198.51.100.31")
+kinds = [n["kind"] for n in via["nodes"]]
+check("the egress interface is a step in the deep path",
+      "intf" in kinds, str(kinds))
+check("and it sits between the source and the next hop",
+      [n["label"] for n in via["nodes"]][:3]
+      == ["EDGE-A1", "Ethernet1/54", "203.0.113.2"],
+      str([n["label"] for n in via["nodes"]]))
+
+DOWN = WITH_INTF + "\nEthernet1/54 is down, line protocol is down\n"
+broke = path_from_checks([{"cmd": "show ip route", "output": DOWN}],
+                         "EDGE-A1", "EDGE-B2", "198.51.100.31")
+check("with the interface down the path still shows it, then stops",
+      [n["label"] for n in broke["nodes"]]
+      == ["EDGE-A1", "Ethernet1/54", "203.0.113.2", "X"],
+      str([n["label"] for n in broke["nodes"]]))
+
+
+# ---- 9. what the ladder tells the model about real platforms ---------------
+from agent.prompts import DEEP_CHECK_PROMPT as LADDER               # noqa: E402
+
+for rule, why in [
+    ("VRF-Name", "a column header was once read as the name of a VRF"),
+    ("show ip route vrf all", "listing VRFs and stopping answers nothing"),
+    ("management VRF", "a management address is not reachable from the "
+                       "default table, and that is not a fault"),
+    ("show forwarding ipv4 route", "the hardware table is the authority"),
+    ("show cdp neighbors", "who the neighbour is, rather than assuming"),
+    ("mac address-table", "empty is NORMAL on a routed interface"),
+    ("HOP 1", "one hop is expected when the two ends are directly connected"),
+    ("ARP resolving", "a first probe that fails while the rest succeed"),
+    ("traceroute takes few options", "NX-OS rejects the bounded form"),
+]:
+    check(f"the ladder covers: {why}", rule in LADDER, f"missing {rule!r}")
+
 print()
 print("ALL PASSED" if not fails else f"FAILED ({len(fails)}): {fails}")
 sys.exit(1 if fails else 0)

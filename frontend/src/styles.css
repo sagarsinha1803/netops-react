@@ -430,3 +430,19 @@ table.alerts td.mono { font-family: ui-monospace, Consolas, monospace; }
 .report .revised b { color: var(--text); }
 .report .revised.ok b { color: var(--green); }
 .report .revised.bad b { color: var(--red); }
+
+/* the interface the traffic leaves by: part of the path, not a device on it */
+.pathchips .hop.intf {
+  border-style: dashed;
+  border-color: var(--blue);
+  color: var(--blue);
+  opacity: .95;
+}
+/* equal-cost alternatives, laid out in sequence but marked as such */
+.pathchips .hop .altmark {
+  margin-left: 6px;
+  font-size: 9px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
