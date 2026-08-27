@@ -294,10 +294,14 @@ class Workflow:
             self.local = True
         self.set(self.stage_for(command_text, name), "running", command_text[:60])
 
-    def add_check(self, command, device, region=None, thought="", said=True):
+    def add_check(self, command, device, region=None, thought="", said=True,
+                  kind="device"):
+        # kind="system" is a step that asked Tufin, the CMDB or Archangel
+        # rather than a device. It belongs in the list -- it spent a step of
+        # the budget -- but it is not evidence about the route.
         self.checks.append({"cmd": command, "device": device, "region": region,
                             "status": "running", "detail": "", "thought": thought,
-                            "saidIt": bool(said and thought),
+                            "saidIt": bool(said and thought), "kind": kind,
                             "output": "", "step": len(self.checks) + 1})
         return len(self.checks) - 1
 
@@ -1144,6 +1148,11 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
     INTENDS to do next, which is the question a trace full of stars leaves
     open.
     """
+    # A Tufin or CMDB reply is a JSON blob full of addresses, and reading one
+    # as a forwarding decision the source made would invent a hop nobody saw.
+    # Those rows are shown, but they say nothing about the route.
+    checks = [c for c in (checks or []) if c.get("kind") != "system"]
+
     settled = _probe_settled(checks, src_label, dst_label, dest_addr)
     if settled:
         return settled

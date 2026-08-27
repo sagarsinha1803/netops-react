@@ -349,8 +349,9 @@ async def build_agent(checkpointer=None):
         tool calls -- no content, so no report, so the panel showed a run that
         simply stopped. An engineer cannot tell that from a crash.
 
-        So ask once more with NO tools bound: the model cannot request another
-        call, and has to say what it found and what it could not finish.
+        So ask once more, saying the budget is gone. Anything it asks for
+        anyway is stripped here and reported as the check it WOULD have run
+        next, which is the one thing an operator can act on.
         """
         msgs = list(state["messages"])
         if not any(getattr(m, "type", "") == "system" for m in msgs):
@@ -362,16 +363,29 @@ async def build_agent(checkpointer=None):
                         "call. Any step you could not finish is INCONCLUSIVE "
                         "-- say which, say what you would run next, and do not "
                         "present a guess as a result.")]
-        reply = await llm.ainvoke(msgs)          # llm, not llm_with_tools
+        # llm_with_tools, NOT the bare llm. The clipboard relay only reads a
+        # reply as JSON when tool schemas are bound to it, so answering here
+        # through the unbound model dropped whatever came back into the panel
+        # verbatim -- a wall of braces where the report belongs, whether the
+        # model sent one more tool call or a perfectly good final answer.
+        # Binding is not a licence to call: anything asked for is stripped.
+        reply = await llm_with_tools.ainvoke(msgs)
         text = str(getattr(reply, "content", "") or "").strip()
+        asked = list(getattr(reply, "tool_calls", None) or [])
+        if asked:
+            nxt = "; ".join(display_command(c["name"], c.get("args") or {})
+                            for c in asked)
+            text = (text + "\n\n" if text else "") + (
+                "INCONCLUSIVE: the tool budget for this run is spent, so this "
+                "is not a verdict. The next check would have been: " + nxt)
         if not text:
             text = ("The tool budget for this run was spent before a "
                     "conclusion was reached. Nothing here is a verdict: "
                     "re-run with a narrower question, or run the remaining "
                     "checks by hand.")
-        # a plain message, not the model's own: a model that ignores an empty
-        # tool list would otherwise leave a dangling tool call as the last
-        # message, and everything downstream reads that as "still working"
+        # a plain message, not the model's own: carrying its tool_calls through
+        # would leave a dangling call as the last message, and everything
+        # downstream reads that as "still working"
         return {"messages": [AIMessage(content=text)], "answer": text}
 
     # ---- router: keep looping while the model asks for tools -------------

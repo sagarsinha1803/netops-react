@@ -382,10 +382,24 @@ class ClipboardLLM(BaseChatModel):
 
     # ---- reply parsing ------------------------------------------------------
     def _to_message(self, text: str) -> AIMessage:
+        obj = _extract_json(text) if text else None
+
         if not self.tool_schemas:
+            # Nothing is bound, so nothing may be CALLED -- but the reply is
+            # still written in the JSON contract the rest of the run used, and
+            # handing the raw object on as the final answer shows the operator
+            # a wall of braces instead of a report. Read it; ignore any call.
+            if isinstance(obj, dict):
+                if "final" in obj:
+                    final = obj["final"]
+                    return AIMessage(
+                        content=json.dumps(final, ensure_ascii=False)
+                        if isinstance(final, (dict, list)) else str(final))
+                thought = str(obj.get("thought") or "").strip()
+                if thought:
+                    return AIMessage(content=thought)
             return AIMessage(content=text)
 
-        obj = _extract_json(text)
         if not obj:                                  # no JSON -> treat as the answer
             return AIMessage(content=text)
 

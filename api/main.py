@@ -174,6 +174,20 @@ async def drive(sess: Session, app_graph, config, first_input,
                                 label, thought=why, said=said,
                                 kind="policy" if policy else
                                      "alerts" if alerts else "cmdb")
+                        else:
+                            # A deeper-checks turn spends the same budget on
+                            # these and showed none of them: the operator
+                            # counts seven rows, is told the budget of ten ran
+                            # out, and cannot reconcile the two. Show them --
+                            # marked, so the path parser still ignores them.
+                            check_idx[tc.get("id")] = wf.add_check(
+                                display_command(tc["name"], args),
+                                ("Tufin SecureTrack"
+                                 if tc["name"] in POLICY_TOOL_NAMES
+                                 else "Archangel"
+                                 if tc["name"] in ALERT_TOOL_NAMES else "CMDB"),
+                                args.get("region"), why, said=said,
+                                kind="system")
                         continue
                     cmd = display_command(tc["name"], args)
                     where = (args.get("device_ip") or args.get("source")
@@ -377,6 +391,16 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         await sess.push_wf()
         await sess.send({"type": "error", "message": str(e)})
         return
+
+    # A budget that ran out is the difference between "it looked and found
+    # nothing" and "it was stopped before it finished". Saying so is the whole
+    # of it: the answer below is what it had, not what it concluded.
+    cap = int(first_input.get("max_loops") or 0)
+    if cap and (state.get("loops") or 0) >= cap:
+        await sess.send({"type": "status", "state": "degraded",
+                         "detail": f"the tool budget for this turn ran out "
+                                   f"after {cap} steps - what follows is what "
+                                   f"the agent had, not a verdict"})
 
     if workflow_turn and not show_commands:
         await fill_alerts(sess, wf)
