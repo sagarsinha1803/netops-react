@@ -435,6 +435,13 @@ check("with the interface down the path still shows it, then stops",
 from agent.prompts import DEEP_CHECK_PROMPT as LADDER               # noqa: E402
 
 for rule, why in [
+    ("YOUR JOB IS THE PATH", "the job is the route, not just the fault"),
+    ("RESOLVE RECURSIVELY", "a next hop is itself reached through a route"),
+    ("EQUAL COST", "several next hops must all be named, not one picked"),
+    ("show mpls forwarding-table", "the label stack IS the path in an L3VPN"),
+    ("show lldp neighbors", "the neighbour names the hop when a trace cannot"),
+    ("source <intf>", "the source address changes which route is tested"),
+    ("REPORT THE PATH", "the hop list must be what was actually proved"),
     ("VRF-Name", "a column header was once read as the name of a VRF"),
     ("show ip route vrf all", "listing VRFs and stopping answers nothing"),
     ("management VRF", "a management address is not reachable from the "
