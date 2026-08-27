@@ -215,6 +215,62 @@ check("the device command is in the list too, as a device step",
 check("and the run says out loud that the budget ran out",
       any("budget" in n.lower() for n in notices), str(notices)[:120])
 
+# ---- 5. a reply that will not parse gets one more ask, not a full stop ----
+# Everything above is about a run that stopped politely. This is the same
+# ending arrived at from the other side: the model DID choose a next step and
+# wrote it in a shape nothing can read. Accepting that as the final answer
+# stops the investigation with the braces on screen and no step run.
+from langchain_core.messages import ToolMessage                 # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatResult   # noqa: E402
+from langchain_core.messages import AIMessage as _AI            # noqa: E402
+
+UNREADABLE = ("{tool: execute_query_on_server, "
+              "args: (device_ip 203.0.113.9, commands [show vrf all])}")
+
+
+class Sloppy(ScriptedModel):
+    """Answers once in a shape no reader can rescue, then behaves."""
+
+    broke: bool = False
+
+    def _generate(self, messages, stop=None, run_manager=None, **kw):
+        if not self.broke:
+            self.broke = True
+            return ChatResult(generations=[
+                ChatGeneration(message=_AI(content=UNREADABLE))])
+        return super()._generate(messages, stop, run_manager, **kw)
+
+
+C.MAX_TOOL_LOOPS = 16
+G.llm = Sloppy(
+    script=[("get_device_details", {"device_name": SRC})],
+    thoughts=["Looking up the source."],
+    final={"result": "INCONCLUSIVE", "cause": "only the CMDB was read"})
+
+
+async def asked_again():
+    app = await G.build_agent()
+    return await app.ainvoke(
+        {"messages": [("user", f"Troubleshoot {SRC} to {DST} on tcp:22")],
+         "loops": 0},
+        {"configurable": {"thread_id": "stopped-2"}})
+
+
+after = asyncio.run(asked_again())
+ran = [m for m in after["messages"] if isinstance(m, ToolMessage)]
+answer5 = str(after.get("answer") or "")
+
+check("an unreadable reply does not end the run",
+      bool(ran), str([type(m).__name__ for m in after["messages"]]))
+check("the step it meant to take is asked for again and runs",
+      any("device_details" in str(getattr(m, "name", "")) for m in ran),
+      str([getattr(m, "name", "") for m in ran]))
+check("and the run reaches a real report",
+      bool(as_report(answer5)), answer5[:70])
+check("the braces are not what lands in the panel",
+      not answer5.strip().startswith("{tool:"), answer5[:70])
+
+
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")
 sys.exit(1 if fails else 0)

@@ -186,12 +186,68 @@ def _repair_quotes(text: str) -> str:
     return "".join(out)
 
 
+def _objects_in(text: str, limit: int = 5):
+    """Every plausible JSON object in the text, outermost first.
+
+    The old reader took `\\{.*\\}` -- the first brace to the LAST one anywhere
+    in the reply. One brace too many at the end ("...}}}"), which is an easy
+    slip for a model closing three nested objects, swallowed the extra into
+    the candidate and made the whole thing unparseable. The reply was then
+    treated as the final answer, so a run in the middle of an escalation
+    stopped dead and printed the braces where the report belongs.
+
+    Counting instead: a candidate ends at the brace that closes the one it
+    started on, so trailing junk cannot get in. If the text runs out while
+    still open -- a paste that was cut short -- close what is open and let the
+    caller decide whether what came back makes sense.
+    """
+    start = text.find("{")
+    seen = 0
+    while start != -1 and seen < limit:
+        depth, in_string, escaped, closed = 0, False, False, False
+        stack = []
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+                depth += 1
+            elif ch in "}]":
+                if stack:
+                    stack.pop()
+                depth -= 1
+                if depth == 0:
+                    yield text[start:i + 1]
+                    closed = True
+                    break
+        if not closed:
+            # cut short: drop whatever trailing junk stopped it from closing
+            # (a paren typed for a brace, a stray bullet), shut an open string,
+            # then close every container still on the stack
+            tail = text[start:]
+            if not in_string:
+                tail = re.sub(r"[^\w\"\]\}]+$", "", tail)
+            yield tail + ('"' if in_string else "") + "".join(reversed(stack))
+        seen += 1
+        start = text.find("{", start + 1)
+
+
 def _extract_json(text: str) -> Optional[dict]:
     """Pull the first JSON object out of the reply.
 
     Copilot renders typographic quotes, so a straight json.loads on a copied
     answer fails; normalise those (and nbsp/zero-width) before parsing.
-    Tolerates ``` fences and surrounding prose.
+    Tolerates ``` fences, surrounding prose, bold, an unbalanced tail and a
+    paste that was cut off.
     """
     cleaned = text.strip()
     for bad, good in _SMART.items():
@@ -201,30 +257,43 @@ def _extract_json(text: str) -> Optional[dict]:
     # otherwise tool names never match.
     cleaned = re.sub(r"\\([_*\[\]()#+\-.!~`>])", r"\1", cleaned)
 
-    m = _JSON_RE.search(cleaned)
-    if not m:
-        return None
-    candidate = m.group(0)
-    # copying from rendered markdown puts real newlines inside string values,
-    # which json.loads rejects -> collapse them and retry.
-    flat = re.sub(r"\s*\n\s*", " ", candidate)
+    # Emphasis is stripped only as a SECOND reading: a CLI argument could
+    # legitimately contain ** and rewriting a command is worse than not
+    # parsing it, so the untouched text always gets the first chance.
+    views = [cleaned]
+    without_emphasis = cleaned.replace("**", "")
+    if without_emphasis != cleaned:
+        views.append(without_emphasis)
 
-    # last resort: escape quotes the model left loose inside a CLI filter
-    for attempt in (candidate, flat, _repair_quotes(candidate),
-                    _repair_quotes(flat)):
-        try:
-            obj = json.loads(attempt)
-            if isinstance(obj, dict):
-                return obj
-        except Exception:
-            pass
-        try:                                   # trailing commas / single quotes
-            import ast
-            obj = ast.literal_eval(attempt)
-            if isinstance(obj, dict):
-                return obj
-        except Exception:
-            pass
+    # The whole reply first, in every reading, and only then the objects
+    # NESTED inside it. Taking the first thing that happens to parse returned
+    # the args of a call whose outer object was damaged -- an argument bag with
+    # no tool name, which is not a call and cannot be run.
+    outer, inner = [], []
+    for view in views:
+        for i, candidate in enumerate(_objects_in(view)):
+            (outer if i == 0 else inner).append(candidate)
+
+    import ast
+    for candidate in outer + inner:
+        # copying from rendered markdown puts real newlines inside string
+        # values, which json.loads rejects -> collapse them and retry.
+        flat = re.sub(r"\s*\n\s*", " ", candidate)
+        # last resort: escape quotes the model left loose in a CLI filter
+        for attempt in (candidate, flat, _repair_quotes(candidate),
+                        _repair_quotes(flat)):
+            try:
+                obj = json.loads(attempt)
+                if isinstance(obj, dict):
+                    return obj
+            except Exception:
+                pass
+            try:                               # trailing commas / single quotes
+                obj = ast.literal_eval(attempt)
+                if isinstance(obj, dict):
+                    return obj
+            except Exception:
+                pass
     return None
 
 

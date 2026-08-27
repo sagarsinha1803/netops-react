@@ -46,6 +46,7 @@ from agent.constants import (ALERT_TOOL_NAMES,    # noqa: E402
                              DEVICE_TOOL_NAMES, POLICY_TOOL_NAMES)
 from agent.llm import ip_mask                     # noqa: E402
 from agent.prompts import DEEP_CHECK_PROMPT       # noqa: E402
+from agent.salvage import looks_like_a_call      # noqa: E402
 from agent.utils import describe_call, display_command           # noqa: E402
 
 from api.workflow import (Workflow, as_report, check_ok,      # noqa: E402
@@ -448,6 +449,15 @@ async def run_turn(sess: Session, text: str, show_commands=False):
         state["messages"][-1].content if state.get("messages") else "")
 
     parsed = as_report(answer)
+    # A run that ended on an unreadable tool call did not conclude -- it was
+    # cut off, and the panel would otherwise show the braces with no word of
+    # explanation. The graph already asked once for it again; saying so is
+    # what is left.
+    if not parsed and looks_like_a_call(answer, net_agent.TOOLS_BY_NAME):
+        await sess.send({"type": "status", "state": "degraded",
+                         "detail": "the model's last reply could not be read "
+                                   "as a tool call, so the run stopped there "
+                                   "- that step never ran"})
     if parsed and workflow_turn:
         # a question's answer belongs in the chat, not in the run's report
         if show_commands:

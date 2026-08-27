@@ -35,7 +35,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent import constants as C            # noqa: E402
 from agent import prompts                   # noqa: E402
 from agent.guards import check_command      # noqa: E402
-from agent.salvage import salvage_tool_call  # noqa: E402
+from agent.salvage import (looks_like_a_call,       # noqa: E402
+                           salvage_tool_call)
 from agent.state import NetState            # noqa: E402
 from agent.utils import (commands_of, display_command,  # noqa: E402
                          tool_text)
@@ -227,6 +228,34 @@ async def build_agent(checkpointer=None):
                     content=str(reply.content or ""),
                     tool_calls=[{"name": name, "args": args,
                                  "id": f"salvaged_{state.get('loops') or 0}"}])
+            elif looks_like_a_call(str(reply.content or ""), by_name):
+                # It meant to run something and the text will not parse as
+                # anything runnable. Accepting that as the final answer stops
+                # the run mid-ladder and prints braces where the report goes,
+                # which is the worst of both. Ask once, for the same step,
+                # written so it can be read.
+                print("[LLM] a reply that reads like a tool call would not "
+                      "parse -- asking once more for the same step",
+                      file=sys.stderr)
+                again = await llm_with_tools.ainvoke(
+                    list(msgs) + [AIMessage(content=str(reply.content or "")),
+                                  ("user",
+                                   "That reply could not be read as JSON, so "
+                                   "nothing was run and the investigation is "
+                                   "exactly where it was. Send the SAME step "
+                                   "again as ONE JSON object and nothing else: "
+                                   "no prose around it, no bold, and check "
+                                   "that every brace and bracket closes.")])
+                if getattr(again, "tool_calls", None):
+                    reply = again
+                else:
+                    retry = salvage_tool_call(str(again.content or ""), by_name)
+                    if retry:
+                        name, args = retry
+                        reply = AIMessage(
+                            content=str(again.content or ""),
+                            tool_calls=[{"name": name, "args": args,
+                                         "id": f"repaired_{state.get('loops') or 0}"}])
 
         out: dict = {"messages": [reply]}
         if not getattr(reply, "tool_calls", None) and reply.content:

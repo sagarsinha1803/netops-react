@@ -113,3 +113,21 @@ def salvage_tool_call(text: str, tool_names):
     if best[0] <= 0 and len(scored) > 1:
         return None                             # nothing fits: do not guess
     return (best[2], args)
+
+
+def looks_like_a_call(text, tool_names):
+    """True when a reply reads like a tool call that would not parse.
+
+    The difference that matters: a model that has finished says so in prose or
+    in a report, and a model in the middle of an escalation writes an object
+    naming a tool. When that object will not parse -- one brace too many, a
+    paste cut short -- the graph sees no tool calls and reads the reply as the
+    final answer, so the run stops mid-ladder and prints the braces where the
+    report belongs. Worth one more ask before accepting that as the end.
+    """
+    body = str(text or "")
+    if "{" not in body:
+        return False
+    if _args_from(body) is not None:
+        return False                            # it parsed; it was just not a call
+    return '"tool"' in body or any(name in body for name in tool_names)
