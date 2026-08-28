@@ -604,6 +604,12 @@ _UNUSABLE = re.compile(
 _BARE_PROMPT = re.compile(r"^\S*[#>$]\s*$")
 
 
+def echo_parts(command: str):
+    """The individual commands inside what the panel shows as one line."""
+    return [part.strip() for part in str(command or "").split(";")
+            if part.strip()]
+
+
 def usable_output(body, command: str = "") -> bool:
     """Did this output answer the command at all?
 
@@ -616,8 +622,13 @@ def usable_output(body, command: str = "") -> bool:
         return False
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if command:
-        # drop the device's echo of the command itself
-        lines = [ln for ln in lines if command.strip() not in ln]
+        # drop the device's echo of the command itself. Each command
+        # SEPARATELY: a call that carries two of them is shown joined with a
+        # semicolon, and the device echoes them one per line -- so matching the
+        # joined string matched nothing, and a session that answered with two
+        # echoes and no output kept its green tick.
+        lines = [ln for ln in lines
+                 if not any(part in ln for part in echo_parts(command))]
     # and the bare prompt it prints afterwards -- "SW-01#", "user@host:~$",
     # "RP/0/RSP0/CPU0:CORE-01#". Left in, a session that answered nothing at
     # all still looked like it had said something.

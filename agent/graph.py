@@ -171,6 +171,40 @@ async def _load_tools(client):
     return tools, owner, failed
 
 
+def _call_key(name: str, args: dict) -> str:
+    """One string for "this exact question, asked of this exact thing".
+
+    Built from what the operator sees rather than from the raw arguments, so
+    the same command written with different spacing is one question, and the
+    same command aimed at a different device is two.
+    """
+    where = str((args or {}).get("device_ip") or (args or {}).get("source") or "")
+    shown = " ".join(display_command(name, args or {}).lower().split())
+    return f"{name.lower()}|{where.lower()}|{shown}"
+
+
+def _already_run(messages) -> dict:
+    """key -> what it returned, for every call this thread has made.
+
+    Whole thread, not just this turn: the deeper checks continue the same
+    investigation, and re-running the basic ping there is exactly as useless
+    as re-running it here.
+    """
+    out, pending = {}, {}
+    for m in messages:
+        for tc in (getattr(m, "tool_calls", None) or []):
+            pending[tc.get("id")] = _call_key(tc.get("name") or "",
+                                              tc.get("args") or {})
+        if isinstance(m, ToolMessage):
+            key = pending.get(getattr(m, "tool_call_id", None))
+            body = str(getattr(m, "content", "") or "")
+            # a rejection or an error is not an answer: asking again with the
+            # same words is pointless, but it is not the model repeating work
+            if key and body and not body.startswith(("REJECTED:", "ALREADY RUN")):
+                out.setdefault(key, body)
+    return out
+
+
 LAST_FAILED_SERVERS: dict = {}     # set by build_agent, read by the UI
 
 # name -> tool, for the few steps the API layer runs ITSELF when the model
@@ -267,11 +301,23 @@ async def build_agent(checkpointer=None):
         last = state["messages"][-1]
         calls = list(getattr(last, "tool_calls", []) or [])
 
+        # What this investigation has already asked, and what it got back. A
+        # model that cannot see progress asks the same question again: a real
+        # run spent four of its steps re-running two commands it had already
+        # run, and the operator watched the same lines scroll past twice.
+        # Running it a second time cannot answer anything the first did not.
+        earlier = _already_run(state["messages"][:-1])
+
         # PHASE 1 -- validate + collect every approval BEFORE anything runs, so a
         # resume (which re-executes this node) can never run a command twice.
         verdict: dict = {}
         for tc in calls:
             name, args = tc["name"], tc.get("args") or {}
+            done = earlier.get(_call_key(name, args))
+            if done is not None:
+                # no device is touched, so no approval is asked for either
+                verdict[tc["id"]] = ("REPEAT", done)
+                continue
             if not touches_device(name):
                 verdict[tc["id"]] = True
                 continue
@@ -303,8 +349,17 @@ async def build_agent(checkpointer=None):
             name, args, tid = tc["name"], tc.get("args") or {}, tc["id"]
             gate = verdict.get(tid)
 
-            if gate is not True:
-                result: Any = gate
+            if isinstance(gate, tuple) and gate[0] == "REPEAT":
+                print(f"[LLM] asked again for a command already run: "
+                      f"{display_command(name, args)}", file=sys.stderr)
+                result: Any = (
+                    "ALREADY RUN in this investigation. This is the result "
+                    "from the first time, unchanged -- running it again "
+                    "cannot answer anything it did not answer then. Take it "
+                    "as read and choose a DIFFERENT check, or conclude with "
+                    "what you have.\n\n" + str(gate[1]))
+            elif gate is not True:
+                result = gate
             elif name not in by_name:
                 result = f"unknown tool '{name}' (have: {sorted(by_name)})"
             else:
@@ -327,7 +382,9 @@ async def build_agent(checkpointer=None):
 
             out_msgs.append(ToolMessage(content=text, name=name, tool_call_id=tid))
 
-            if touches_device(name):
+            if isinstance(gate, tuple):
+                pass                            # a repeat ran nothing to audit
+            elif touches_device(name):
                 audit.append({"device_ip": args.get("device_ip") or args.get("source")
                               or ("agent host" if name.startswith("local_") else None),
                               "command": display_command(name, args),

@@ -52,7 +52,7 @@ from agent.utils import describe_call, display_command           # noqa: E402
 from api.workflow import (Workflow, as_report, check_ok,      # noqa: E402
                           cmdb_record, device_label, failed_line,
                           parse_alerts, parse_request,
-                          path_from_checks, path_from_policy,
+                          echo_parts, path_from_checks, path_from_policy,
                           policy_verdict,
                           usable_output)
 
@@ -215,7 +215,9 @@ async def drive(sess: Session, app_graph, config, first_input,
                 if tid in check_idx or tid in basic_idx:
                     lines = [ln for ln in body.splitlines() if ln.strip()]
                     echo = display_command(name, args)
-                    useful = [ln for ln in lines if echo not in ln]
+                    parts = echo_parts(echo)
+                    useful = [ln for ln in lines
+                              if not any(part in ln for part in parts)]
                     detail = failed_line(body) or (useful or lines or [""])[0]
                     # a command is "ok" only if it both ANSWERED and succeeded:
                     # a refusal, a permission error or silence is not a result
