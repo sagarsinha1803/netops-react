@@ -406,6 +406,18 @@ async def run_turn(sess: Session, text: str, show_commands=False):
                                    f"the agent had, not a verdict"})
 
     if workflow_turn and not show_commands:
+        # The traceroute is not optional and the model walked past it. Ask
+        # once, then carry on with whichever answer is worth more.
+        nudged = await nudge_traceroute(sess, wf, app_graph, config)
+        if nudged is not None:
+            if as_report(str(nudged.get("answer") or "")):
+                state = nudged
+            else:
+                # the second answer is not a report, so keep the first -- but
+                # the hops it just gathered are real and belong to the path
+                keep = dict(nudged)
+                keep["answer"] = state.get("answer")
+                state = keep
         await fill_alerts(sess, wf)
         # Archangel is keyed by device NAME. With no CMDB record there is no
         # name -- so a lookup by address answers "no open alerts found for
@@ -495,6 +507,51 @@ async def run_turn(sess: Session, text: str, show_commands=False):
     await sess.send({"type": "final", "answer": str(answer),
                      "report": parsed, "offer_deep": offer,
                      "is_deep": show_commands})
+
+
+TRACE_NUDGE = (
+    "You have not run the traceroute step, and it is not optional: the path "
+    "is half of what was asked for, a firewall verdict does not replace it, "
+    "and a failed ping is the reason to trace, not a reason to skip it. Run "
+    "the bounded read-only traceroute on the SOURCE device now, in the form "
+    "that platform takes, and nothing else. Then give the final report again "
+    "in the required format.")
+
+
+async def nudge_traceroute(sess, wf, app_graph, config):
+    """Ask once for the traceroute the model skipped.
+
+    The workflow is fixed and the prompt says so twice, but a model that has a
+    firewall verdict in hand reads the story as finished and goes straight to
+    the conclusion. Alerts already had a backstop; the traceroute did not, so
+    the stage sat grey next to a green Conclusion, which reads as "there was
+    nothing to trace" rather than "nobody looked".
+
+    It goes back through the model rather than picking a command here: the
+    syntax belongs to the platform, and choosing it in the server would put a
+    guess on a production device behind the same approval card. One turn, a
+    small budget, and the operator approves it like any other command.
+    """
+    if wf.scope != "path" or wf.local or wf.cmdb_miss:
+        return None
+    if wf.state["trace"]["status"] not in ("pending", ""):
+        return None                        # attempted already: tried, or refused
+    if wf.state["ping"]["status"] in ("pending", ""):
+        return None                        # it never reached the device at all
+
+    await sess.send({"type": "status", "state": "degraded",
+                     "detail": "the traceroute step was skipped - asking the "
+                               "agent for it before concluding"})
+    wf.set("trace", "running", "not run by the agent - asked for by the workflow")
+    await sess.push_wf()
+    try:
+        return await drive(sess, app_graph, config,
+                           {"messages": [("user", TRACE_NUDGE)], "loops": 0,
+                            "max_loops": 4}, False)
+    except Exception as e:                 # noqa: BLE001 -- never lose the run
+        wf.set("trace", "failed", str(e)[:60])
+        await sess.push_wf()
+        return None
 
 
 async def fill_alerts(sess, wf):
