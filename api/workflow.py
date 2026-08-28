@@ -898,6 +898,94 @@ _FIB_BROKEN = re.compile(
     r"|adjacency\s+incomplete|glean adjacency", re.I)
 
 
+# A route line for an address the device owns: it is not a way onward, it is
+# the device saying "that one is mine". Reading one as a next hop drew the
+# source's own management address as the hop after itself.
+_OWN_ADDRESS = re.compile(r"(?<![\w-])(local|receive|broadcast)(?![\w-])", re.I)
+
+_PREFIX = re.compile(r"(?:^|[\s,])(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})")
+
+
+def _as_int(addr: str) -> int:
+    parts = [int(p) for p in str(addr).split(".")]
+    return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+
+
+def _covers(prefix: str, length: int, addr: str) -> bool:
+    """Is addr inside prefix/length? Arithmetic, so it holds for every vendor."""
+    try:
+        if length <= 0:                          # a default route covers all
+            return True
+        mask = ((1 << length) - 1) << (32 - length)
+        return (_as_int(prefix) & mask) == (_as_int(addr) & mask)
+    except Exception:                            # noqa: BLE001 -- malformed line
+        return False
+
+
+def _route_blocks(text: str):
+    """[(prefix, length, the lines under it)] out of a routing table.
+
+    A table is a list of prefixes, each with its own next hops indented under
+    it. Searching the whole dump for the first thing that looks like a next hop
+    answers a question nobody asked -- it returns whichever prefix happens to
+    be printed first, which in a real run was the source's own /32.
+    """
+    blocks, prefix, length, lines = [], "", 0, []
+    for line in str(text or "").splitlines():
+        found = _PREFIX.search(line)
+        # a header names a prefix; a next-hop line sits under one
+        if found and not re.search(r"\bvia\b", line, re.I):
+            if prefix:
+                blocks.append((prefix, length, "\n".join(lines)))
+            prefix, length, lines = found.group(1), int(found.group(2)), [line]
+        elif prefix:
+            lines.append(line)
+    if prefix:
+        blocks.append((prefix, length, "\n".join(lines)))
+    return blocks
+
+
+def route_for(text: str, dest_addr: str):
+    """The part of the output that is the route TO dest_addr, or None.
+
+    None means two different things and the caller has to tell them apart:
+    no prefixes were recognised at all (so scope nothing, read it as before),
+    or prefixes were recognised and none of them covers the destination (which
+    is itself the answer -- there is no route).
+    """
+    if not dest_addr:
+        return None
+    blocks = _route_blocks(text)
+    if not blocks:
+        return None
+    hits = [b for b in blocks if _covers(b[0], b[1], dest_addr)]
+    if not hits:
+        return ""                                # recognised, and none matched
+    return max(hits, key=lambda b: b[1])[2]      # most specific wins
+
+
+def pick_next_hop(text: str, src_addr: str = ""):
+    """(next hop, egress interface) the source intends to use, or ("", "").
+
+    Skips the two things that are not a way onward: an address the device owns
+    (a local, receive or broadcast entry) and the source's own address.
+    """
+    body = str(text or "")
+    for pattern in _NEXT_HOP:
+        for found in pattern.finditer(body):
+            start = body.rfind("\n", 0, found.start()) + 1
+            end = body.find("\n", found.end())
+            line = body[start:end if end != -1 else len(body)]
+            if _OWN_ADDRESS.search(line):
+                continue
+            hop = found.group(1)
+            if src_addr and hop == str(src_addr):
+                continue
+            egress = (found.group(2) or "").strip() if found.lastindex else ""
+            return hop, egress
+    return "", ""
+
+
 def blockage(text, next_hop="", egress=""):
     """The exact reason nothing gets through, in a few words, or "".
 
@@ -1180,13 +1268,28 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
     if not text.strip():
         return None
 
-    next_hop, egress = "", ""
-    for pattern in _NEXT_HOP:
-        found = pattern.search(text)
-        if found:
-            next_hop = found.group(1)
-            egress = (found.group(2) or "").strip() if found.lastindex else ""
-            break
+    # the address the commands ran against: its own address is not a hop
+    src_addr = next((str(c.get("device") or "") for c in checks
+                     if re.match(r"^\d{1,3}(\.\d{1,3}){3}$",
+                                 str(c.get("device") or ""))), "")
+
+    # Read the next hop out of the route to the DESTINATION, not out of
+    # whichever prefix the table happened to print first. "show ip route vrf
+    # default" is the whole table; the first entry in one real run was the
+    # source's own /32, and the path drew the source forwarding to itself.
+    scoped = route_for(text, dest_addr)
+    if scoped == "":
+        # prefixes were recognised and not one of them covers the destination
+        nodes = [{"label": src_label, "ip": None, "kind": "source"},
+                 {"label": "X", "ip": None, "kind": "dead",
+                  "why": "no route to the destination in any table checked"}]
+        return {"nodes": nodes, "line": _line(nodes), "reached": False,
+                "note": ("Every routing table these checks read was searched "
+                         "and none of them has a route that covers the "
+                         "destination -- not even a default. Traffic to it is "
+                         "dropped at the source.")}
+
+    next_hop, egress = pick_next_hop(scoped if scoped else text, src_addr)
     if not next_hop:
         return None
 
