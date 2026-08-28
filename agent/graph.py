@@ -183,26 +183,86 @@ def _call_key(name: str, args: dict) -> str:
     return f"{name.lower()}|{where.lower()}|{shown}"
 
 
+def _command_keys(name: str, args: dict):
+    """[(key, command)] -- one entry per COMMAND, not per call.
+
+    Keying whole calls only caught a model that repeated itself word for word.
+    A model that repeats itself while shuffling the list does not:
+    ["show route X"] and then ["show route X", "show vrf"] are two different
+    calls carrying one identical command, and that command ran twice. Per
+    command, the second call runs only the half that is new.
+    """
+    cmds = [str(c).strip() for c in commands_of(args or {}) if str(c).strip()]
+    if not cmds:                                # not a device tool: one question
+        return [(_call_key(name, args), display_command(name, args or {}))]
+    where = str((args or {}).get("device_ip") or (args or {}).get("source") or "")
+    return [(f"{name.lower()}|{where.lower()}|{' '.join(c.lower().split())}", c)
+            for c in cmds]
+
+
 def _already_run(messages) -> dict:
-    """key -> what it returned, for every call this thread has made.
+    """key -> what it returned, for every command this thread has run.
 
     Whole thread, not just this turn: the deeper checks continue the same
     investigation, and re-running the basic ping there is exactly as useless
     as re-running it here.
+
+    A call carrying several commands answers with one blob, so every command
+    in it maps to that blob. It is the right answer to give back: the output
+    of the command asked for again is somewhere inside it.
     """
     out, pending = {}, {}
     for m in messages:
         for tc in (getattr(m, "tool_calls", None) or []):
-            pending[tc.get("id")] = _call_key(tc.get("name") or "",
-                                              tc.get("args") or {})
+            pending[tc.get("id")] = _command_keys(tc.get("name") or "",
+                                                  tc.get("args") or {})
         if isinstance(m, ToolMessage):
-            key = pending.get(getattr(m, "tool_call_id", None))
+            keys = pending.get(getattr(m, "tool_call_id", None)) or []
             body = str(getattr(m, "content", "") or "")
             # a rejection or an error is not an answer: asking again with the
             # same words is pointless, but it is not the model repeating work
-            if key and body and not body.startswith(("REJECTED:", "ALREADY RUN")):
-                out.setdefault(key, body)
+            if body and not body.startswith(("REJECTED:", "ALREADY RUN")):
+                for key, _cmd in keys:
+                    out.setdefault(key, body)
     return out
+
+
+def _ran_note(messages) -> str:
+    """The list of what has run, for a model that has just asked twice.
+
+    Sent only when it repeats itself, which is the moment the words are worth
+    it -- and it rides inside a tool result, so it costs no extra message and
+    cannot shift the relay's idea of what it has already pasted.
+    """
+    ran = _ran_so_far(messages)
+    if len(ran) < 2:
+        return ""
+    return ("Everything run in this investigation so far, none of which needs "
+            "running again: " + "; ".join(ran) + "\n\n")
+
+
+def _ran_so_far(messages, limit: int = 20):
+    """The commands this investigation has run, in order, for the model.
+
+    A model repeats itself when it cannot see its own progress -- and through
+    the bridge there is no recap, only a conversation long enough to lose the
+    beginning of. This is one short line per turn, and it is the difference
+    between "I do not remember checking the routing table" and not asking
+    again.
+    """
+    seen, pending = [], {}
+    for m in messages:
+        for tc in (getattr(m, "tool_calls", None) or []):
+            pending[tc.get("id")] = _command_keys(tc.get("name") or "",
+                                                  tc.get("args") or {})
+        if isinstance(m, ToolMessage):
+            body = str(getattr(m, "content", "") or "")
+            if body.startswith(("REJECTED:", "ALREADY RUN")):
+                continue
+            for _key, cmd in pending.get(getattr(m, "tool_call_id", None)) or []:
+                if cmd not in seen:
+                    seen.append(cmd)
+    return seen[-limit:]
 
 
 LAST_FAILED_SERVERS: dict = {}     # set by build_agent, read by the UI
@@ -245,6 +305,7 @@ async def build_agent(checkpointer=None):
         msgs = state["messages"]
         if not any(getattr(m, "type", "") == "system" for m in msgs):
             msgs = [("system", SYSTEM_PROMPT + unavailable)] + list(msgs)
+
         reply = await llm_with_tools.ainvoke(msgs)
 
         # A model that writes its tool call out as prose instead of calling
@@ -311,13 +372,25 @@ async def build_agent(checkpointer=None):
         # PHASE 1 -- validate + collect every approval BEFORE anything runs, so a
         # resume (which re-executes this node) can never run a command twice.
         verdict: dict = {}
+        trimmed: dict = {}                 # call id -> the args actually run
         for tc in calls:
             name, args = tc["name"], tc.get("args") or {}
-            done = earlier.get(_call_key(name, args))
-            if done is not None:
+
+            # Which of the commands in THIS call are new. A call that carries
+            # three, two of which have already run, runs the one that has not
+            # -- shuffling the list is not a new question.
+            pairs = _command_keys(name, args)
+            done = [(key, cmd) for key, cmd in pairs if key in earlier]
+            fresh = [cmd for key, cmd in pairs if key not in earlier]
+            if done and not fresh:
                 # no device is touched, so no approval is asked for either
-                verdict[tc["id"]] = ("REPEAT", done)
+                verdict[tc["id"]] = ("REPEAT", earlier[done[0][0]])
                 continue
+            if done and commands_of(args):
+                args = dict(args, commands=fresh)
+                trimmed[tc["id"]] = (args, [cmd for _key, cmd in done])
+                print(f"[LLM] dropping {len(done)} command(s) already run; "
+                      f"running {fresh}", file=sys.stderr)
             if not touches_device(name):
                 verdict[tc["id"]] = True
                 continue
@@ -346,7 +419,11 @@ async def build_agent(checkpointer=None):
         upd: dict = {}
 
         for tc in calls:
-            name, args, tid = tc["name"], tc.get("args") or {}, tc["id"]
+            name, tid = tc["name"], tc["id"]
+            # what PHASE 1 approved, which is the call minus anything already
+            # run -- never the model's original list, or a command the
+            # operator was never shown would run
+            args = (trimmed[tid][0] if tid in trimmed else tc.get("args") or {})
             gate = verdict.get(tid)
 
             if isinstance(gate, tuple) and gate[0] == "REPEAT":
@@ -357,7 +434,8 @@ async def build_agent(checkpointer=None):
                     "from the first time, unchanged -- running it again "
                     "cannot answer anything it did not answer then. Take it "
                     "as read and choose a DIFFERENT check, or conclude with "
-                    "what you have.\n\n" + str(gate[1]))
+                    "what you have.\n\n"
+                    + _ran_note(state["messages"]) + str(gate[1]))
             elif gate is not True:
                 result = gate
             elif name not in by_name:
@@ -369,6 +447,14 @@ async def build_agent(checkpointer=None):
                     result = f"error calling {name}: {e}"
 
             text = tool_text(result)
+            if tid in trimmed and gate is True:
+                # say which half of the call was dropped, or the model reads
+                # the shorter output as the device having answered less
+                text = ("NOT RUN AGAIN, already run earlier in this "
+                        "investigation: " + "; ".join(trimmed[tid][1]) +
+                        ". Their output stands. What follows is only the "
+                        "part of this call that was new.\n\n"
+                        + _ran_note(state["messages"]) + text)
 
             # Register the names in this result so the relay can swap them out
             # of the next paste. Done here, where results are still structured,

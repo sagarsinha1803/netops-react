@@ -110,6 +110,66 @@ check("the run still reaches a report",
       "INCONCLUSIVE" in str(state.get("answer") or ""),
       str(state.get("answer"))[:70])
 
+# ---- the second run: the same command hidden in a longer list -------------
+# What the first fix missed. The model does not repeat itself word for word --
+# it re-sends the command it already ran inside a call that carries one or two
+# more, so the CALL is new and the command is not. On the device that is the
+# same question asked twice, and the operator watches the same table print
+# again.
+FIRST = f"show ip route {DST}"
+VRFS = "show vrf"
+DEFAULT = "show ip route vrf default"
+
+
+def ssh_many(commands):
+    return ("execute_query_on_server",
+            {"device_ip": SRC, "commands": list(commands), "region": "INDIA"})
+
+
+G.llm = ScriptedModel(
+    script=[ssh_many([FIRST]),
+            ssh_many([VRFS, FIRST]),            # FIRST again, in a longer list
+            ssh_many([DEFAULT, VRFS]),          # VRFS again, reordered
+            ssh_many([DEFAULT, VRFS, FIRST])],  # all three, none of them new
+    thoughts=["The forwarding table first.",
+              "Listing the routing contexts, and the table again.",
+              "The default context, and the contexts again.",
+              "All three once more."],
+    final={"result": "INCONCLUSIVE", "cause": "nothing new was learned"})
+
+
+async def run_lists():
+    app = await G.build_agent()
+    config = {"configurable": {"thread_id": "repeats-2"}}
+    state = await app.ainvoke(
+        {"messages": [("user", f"Troubleshoot {SRC} to {DST} on tcp:22")],
+         "loops": 0}, config)
+    cards = []
+    while "__interrupt__" in state:
+        cards.append(str((state["__interrupt__"][0].value or {}).get("command", "")))
+        if len(cards) > 8:
+            break
+        state = await app.ainvoke(Command(resume=True), config)
+    return state, cards
+
+
+state2, cards = asyncio.run(run_lists())
+audit2 = [a.get("command") for a in (state2.get("commands_run") or [])]
+print()
+for c in cards:
+    print(f"  approval card: {c}")
+
+check("a command already run is dropped from a longer call",
+      not any(FIRST in c and VRFS in c for c in cards), str(cards))
+check("only the new half of the second call is offered",
+      any(c.strip() == VRFS for c in cards), str(cards))
+check("only the new half of the third call is offered",
+      any(c.strip() == DEFAULT for c in cards), str(cards))
+check("a call with nothing new in it is not offered at all",
+      len(cards) == 3, f"{len(cards)} cards for 3 distinct commands")
+check("and each command reached the device exactly once",
+      sorted(audit2) == sorted([FIRST, VRFS, DEFAULT]), str(audit2))
+
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")
 sys.exit(1 if fails else 0)
