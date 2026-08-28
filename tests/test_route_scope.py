@@ -41,9 +41,9 @@ TABLE = "\n".join([
     'IP Route Table for VRF "default"',
     "",
     "203.0.113.81/32, ubest/mbest: 1/0, attached",
-    "    *via 203.0.113.81, Vlan231, [0/0], 4w0d, local",
+    "    *via 203.0.113.81, Vlan10, [0/0], 4w0d, local",
     "203.0.113.0/24, ubest/mbest: 1/0, attached",
-    "    *via 203.0.113.81, Vlan231, [0/0], 4w0d, direct",
+    "    *via 203.0.113.81, Vlan10, [0/0], 4w0d, direct",
     f"{SRC_ADDR}/32, ubest/mbest: 1/0, attached",
     f"    *via {SRC_ADDR}, mgmt0, [0/0], 4w0d, local",
     "198.51.100.0/24, ubest/mbest: 1/0, attached",
@@ -61,7 +61,7 @@ hop, egress = pick_next_hop(scoped, SRC_ADDR)
 check("the next hop is the one on that route", hop == "192.0.2.9", hop)
 check("with the interface it leaves by", egress == "Ethernet1/54", egress)
 
-own, _ = pick_next_hop("    *via 203.0.113.81, Vlan231, [0/0], 4w0d, local", "")
+own, _ = pick_next_hop("    *via 203.0.113.81, Vlan10, [0/0], 4w0d, local", "")
 check("a local entry is never a next hop", own == "", own)
 mine, _ = pick_next_hop(f"    *via {SRC_ADDR}, mgmt0, [0/0], 2d, static", SRC_ADDR)
 check("nor is the source's own address", mine == "", mine)
