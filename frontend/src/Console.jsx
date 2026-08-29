@@ -69,13 +69,18 @@ function StageStrip({ wf }) {
           <React.Fragment key={s.key}>
             {i > 0 && (
               <div className={`stage-link ${
-                ["done", "failed", "skipped"].includes(steps[i - 1].status) &&
+                ["done", "warn", "failed", "skipped"]
+                  .includes(steps[i - 1].status) &&
                 s.status !== "pending" ? "done" : ""}`} />
             )}
             <div className="stage" title={s.detail || s.label}>
+              {/* amber: the stage ran and the answer was bad news -- a ping
+                  with no replies, a trace that never arrived. Red is for a
+                  stage that could not be run at all. */}
               <div className={`ic ${s.status}`}>
-                {s.status === "done" ? "✓" : s.status === "failed" ? "✕"
-                  : s.status === "skipped" ? "–" : ""}
+                {s.status === "done" ? "✓" : s.status === "warn" ? "!"
+                  : s.status === "failed" ? "✕"
+                    : s.status === "skipped" ? "–" : ""}
               </div>
               <div className={`lbl ${s.status === "running" ? "active" : ""}`}>
                 {s.label.replace(" / path discovery", "")

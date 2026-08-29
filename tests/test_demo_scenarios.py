@@ -186,8 +186,10 @@ wf = run("10.20.30.7", "10.60.40.12", "tcp:3306", deep=True,
 steps = show("SCENARIO 2  broken, by IP", wf)
 check("2: the CMDB found both devices",
       steps.get("cmdb", {}).get("status") == "done", str(steps.get("cmdb")))
-check("2: the ping failed",
-      steps.get("ping", {}).get("status") == "failed", str(steps.get("ping")))
+# amber, not red: the probe RAN and came back with no replies. Red on this
+# stage means it could not be run at all, which is a different demo.
+check("2: the ping ran and found nothing reachable",
+      steps.get("ping", {}).get("status") == "warn", str(steps.get("ping")))
 check("2: the path stops short of the destination",
       "X" in (wf.get("path") or {}).get("line", ""),
       (wf.get("path") or {}).get("line", "")[:60])

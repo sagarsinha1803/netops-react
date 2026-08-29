@@ -488,11 +488,22 @@ class Workflow:
             self.set("ping", "done", "Ping result: reachable"
                      + (" (from agent host)" if self.local else ""))
         elif ping is False:
-            self.set("ping", "failed", "Ping result: failed"
+            # "warn", not "failed": the probe RAN and came back with no
+            # replies, which is an answer and the reason for the whole
+            # investigation. Red is for a stage that could not be run at all --
+            # every syntax refused, no output, no permission. Wearing the same
+            # mark made a working ping look like a broken agent.
+            self.set("ping", "warn", "Ping result: failed"
                      + (" (from agent host)" if self.local else ""))
         hops = state.get("hops") or []
         if hops:
-            self.set("trace", "done", f"path contains {len(hops)} hop(s)")
+            arrived = bool((self.path or {}).get("reached"))
+            answered = sum(1 for h in hops if not h.get("timeout"))
+            self.set("trace", "done" if arrived else "warn",
+                     f"path contains {len(hops)} hop(s)" if arrived else
+                     (f"stops after {answered} hop(s) -- the destination never "
+                      f"answered" if answered else
+                      "no hop answered -- the destination was not reached"))
         extra = [c for c in (state.get("commands_run") or [])
                  if "show" in str(c.get("command", "")).lower()]
         if extra:
@@ -604,6 +615,7 @@ _FAILED_OUTPUT = re.compile(
     r"|\b0 (?:packets )?received"
     r"|request timed out"
     r"|destination (host|net) unreachable"
+    r"|no route to host"
     r"|% (network|destination) .*(not|unreachable)"
     r"|" + _REJECTED_SYNTAX,
     re.I)

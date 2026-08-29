@@ -112,7 +112,11 @@ check("the traceroute the model skipped is run",
       any(r.get("kind") == "trace" for r in basics),
       str([r.get("kind") for r in basics]))
 check("the stage is no longer grey",
-      (stages.get("trace") or {}).get("status") in ("done", "failed"),
+      (stages.get("trace") or {}).get("status") in ("done", "warn", "failed"),
+      str(stages.get("trace")))
+# and it says which: the trace ran, and it did not arrive
+check("a trace that never reached the destination is amber, not green",
+      (stages.get("trace") or {}).get("status") == "warn",
       str(stages.get("trace")))
 check("the operator was told the step had been skipped",
       any("traceroute" in n for n in notices), str(notices)[:120])

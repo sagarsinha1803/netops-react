@@ -134,6 +134,8 @@ body {
 .stage .ic.running { background: transparent; border: 2px solid var(--blue); border-top-color: transparent; animation: spin 0.8s linear infinite; }
 .stage .ic.done { background: var(--green); animation: pop 0.3s ease-out; }
 .stage .ic.failed { background: var(--red); animation: pop 0.3s ease-out; }
+/* it ran, and the answer was bad news -- the network, not the agent */
+.stage .ic.warn { background: var(--amber); animation: pop 0.3s ease-out; }
 .stage .ic.skipped { background: var(--gray); opacity: 0.5; }
 .stage .lbl { font-size: 11px; color: var(--dim); white-space: nowrap; }
 .stage .lbl.active { color: var(--text); font-weight: 600; }
