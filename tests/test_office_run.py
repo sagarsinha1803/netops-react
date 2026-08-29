@@ -463,6 +463,33 @@ for banned in ("show ip route", "show cdp neighbors", "display ip routing",
     check(f"the ladder does not hard-code {banned!r}", banned not in LADDER,
           "the model derives the syntax from the platform")
 
+# The model in front of this is a small one -- gpt-4o-mini through the bridge.
+# A wall of prose is where it stops following instructions and starts
+# repeating commands, so the ladder has to stay an ordered procedure it can
+# hold in its head.
+check("the ladder is short enough for a small model to follow",
+      len(LADDER) < 11000, f"{len(LADDER)} characters")
+
+from agent.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_COMPACT   # noqa: E402
+
+for rule, why in [
+    ("ONE command per call", "two in one call get one verdict for both, so a "
+                             "rejection hides behind a success"),
+    ("already run", "asking twice costs a step and teaches nothing"),
+]:
+    for name, prompt in (("ladder", LADDER), ("system", SYSTEM_PROMPT),
+                         ("compact", SYSTEM_PROMPT_COMPACT)):
+        check(f"the {name} prompt says: {why}",
+              rule.lower() in prompt.lower(), f"missing {rule!r}")
+
+for rule, why in [
+    ("LONGEST PREFIX MATCH", "the context is chosen by the match, never "
+                             "because it has a default route"),
+    ("management context", "a management address is looked up where it lives"),
+    ("hidden hop", "a silent hop is not a drop"),
+]:
+    check(f"the ladder covers: {why}", rule in LADDER, f"missing {rule!r}")
+
 
 # ---- 10. two ends on one wire, and where a path stops ----------------------
 # A directly connected pair has no next hop to chase: the path IS the

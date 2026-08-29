@@ -233,9 +233,19 @@ async def drive(sess: Session, app_graph, config, first_input,
                         stage = wf.basics[basic_idx[tid]].get("kind")
                         if stage in ("ping", "trace"):
                             wf.release_basic(stage)
+                    # A command the graph refused to run a second time is
+                    # neither a success nor a failure. A green tick over one
+                    # reads as the device having answered it again, which is
+                    # the very thing that did not happen.
+                    if body.startswith(("ALREADY RUN", "NOT RUN AGAIN")):
+                        repeated = True
+                        detail = "not run again - answered earlier in this run"
+                    else:
+                        repeated = False
                     if tid in check_idx:
                         wf.finish_check(check_idx[tid], ok, detail[:70],
-                                        output=body)
+                                        output=body,
+                                        status="skipped" if repeated else None)
                     elif wf.basics[basic_idx[tid]].get("kind") == "policy":
                         verdict, acl = policy_verdict(body)
                         wf.finish_basic(

@@ -317,9 +317,9 @@ class Workflow:
                             "output": "", "step": len(self.checks) + 1})
         return len(self.checks) - 1
 
-    def finish_check(self, idx, ok, detail="", output=""):
+    def finish_check(self, idx, ok, detail="", output="", status=None):
         if 0 <= idx < len(self.checks):
-            self.checks[idx]["status"] = "done" if ok else "failed"
+            self.checks[idx]["status"] = status or ("done" if ok else "failed")
             self.checks[idx]["detail"] = detail
             if output:
                 self.checks[idx]["output"] = output[:2000]

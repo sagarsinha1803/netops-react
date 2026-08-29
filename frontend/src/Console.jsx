@@ -111,7 +111,9 @@ function FeedRow({ row, showWhy }) {
     <div className="row">
       <div className="line" onClick={() => canOpen && setOpen(!open)}>
         <div className={`st ${row.status}`}>
-          {row.status === "done" ? "✓" : row.status === "failed" ? "✕" : ""}
+          {row.status === "skipped" ? "–"
+            : row.status === "done" ? "✓"
+              : row.status === "failed" ? "✕" : ""}
         </div>
         <div className="cmd mono">{row.cmd}</div>
         {row.device && <div className="chip">{row.device}</div>}
