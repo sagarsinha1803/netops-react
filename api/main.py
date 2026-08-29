@@ -244,7 +244,7 @@ async def drive(sess: Session, app_graph, config, first_input,
                         repeated = False
                     if tid in check_idx:
                         wf.finish_check(check_idx[tid], ok, detail[:70],
-                                        output=body,
+                                        output=body, answered=answered,
                                         status="skipped" if repeated else None)
                     elif wf.basics[basic_idx[tid]].get("kind") == "policy":
                         verdict, acl = policy_verdict(body)
@@ -290,7 +290,7 @@ async def drive(sess: Session, app_graph, config, first_input,
                                         device=label or None, output=body)
                     else:
                         wf.finish_basic(basic_idx[tid], ok, detail[:70],
-                                        output=body)
+                                        output=body, answered=answered)
                     await sess.push_wf()
                 if show_commands and name in DEVICE_TOOL_NAMES:
                     step_no += 1
@@ -424,6 +424,13 @@ async def run_turn(sess: Session, text: str, show_commands=False):
                                    f"after {cap} steps - what follows is what "
                                    f"the agent had, not a verdict"})
 
+    # The deeper checks stopped short with budget left and handed back a
+    # command as the next step. Ask once for the work itself.
+    if show_commands and wf.scope == "path" and not wf.cmdb_miss:
+        more = await nudge_unfinished(sess, wf, app_graph, config, state, cap)
+        if more is not None and as_report(str(more.get("answer") or "")):
+            state = more
+
     if workflow_turn and not show_commands:
         # The traceroute is not optional and the model walked past it. Ask
         # once, then carry on with whichever answer is worth more.
@@ -526,6 +533,54 @@ async def run_turn(sess: Session, text: str, show_commands=False):
     await sess.send({"type": "final", "answer": str(answer),
                      "report": parsed, "offer_deep": offer,
                      "is_deep": show_commands})
+
+
+UNFINISHED_NUDGE = (
+    "You have stopped without isolating the fault, and there is budget left. "
+    "Three things before you finish.\n"
+    "1. If your next_step is a read-only command you are allowed to run -- a "
+    "show, a ping, a traceroute -- RUN IT NOW instead of handing it back. "
+    "Handing an operator a command they could have run themselves is not a "
+    "finding.\n"
+    "2. If any routing context you searched came from a listing that may have "
+    "TRUNCATED its name, confirm the full name and look again. 'No route' "
+    "found in a name that was cut off is not an answer.\n"
+    "3. If you have not probed the NEXT HOP itself, or the destination from "
+    "the egress interface, or inside another context, do that: each is a "
+    "different question from the probes that already ran, and one of them is "
+    "usually what settles this.\n"
+    "Do the most useful one, then give the final report.")
+
+
+async def nudge_unfinished(sess, wf, app_graph, config, state, cap):
+    """One more turn when the deeper checks gave up early.
+
+    A model that has run out of ideas writes a next_step that is a command it
+    was allowed to run, and stops -- with a third of the budget unspent. That
+    is the shape of "no effort was made", and it is worth exactly one push:
+    the ladder has rungs it never reached, and naming them is usually enough.
+
+    Only when there is real room left. Pushing a model that has genuinely
+    spent its budget just produces the same answer more expensively.
+    """
+    verdict = str((as_report(str(state.get("answer") or "")) or {}).get("result")
+                  or "").upper()
+    if verdict in ("REACHABLE", "NOT REACHABLE"):
+        return None                            # it reached a conclusion
+    spent = int(state.get("loops") or 0)
+    if not cap or spent > cap - 4:
+        return None                            # no room to do anything with
+
+    await sess.send({"type": "status", "state": "degraded",
+                     "detail": "the deeper checks stopped without isolating "
+                               "the fault - asking for one more round"})
+    try:
+        return await drive(sess, app_graph, config,
+                           {"messages": [("user", UNFINISHED_NUDGE)],
+                            "loops": spent, "max_loops": cap}, True)
+    except Exception as e:                     # noqa: BLE001 -- never lose the run
+        await sess.send({"type": "error", "message": str(e)[:120]})
+        return None
 
 
 TRACE_NUDGE = (

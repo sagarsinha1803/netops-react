@@ -180,6 +180,8 @@ body {
 }
 .st.done { background: var(--green); }
 .st.failed { background: var(--red); }
+/* it ran, and the answer was bad news: the network, not the syntax */
+.st.failed.negative { background: var(--amber); }
 /* a step that was NOT run because its answer was already gathered: it
    is neither a success nor a failure, and a green tick over one reads
    as the command having run a second time */

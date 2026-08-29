@@ -433,8 +433,12 @@ R1. ONE command per call. Never put two commands in one call. If you want two
     things, ask for the first, read it, then ask for the second.
 R2. Never ask for a command that has already run in this investigation. Its
     output is above. Re-reading it costs a step and teaches you nothing.
-R3. The ping, the traceroute, the CMDB lookup and the policy check have
-    already run. Do not run any of them again.
+R3. The ping and the traceroute TO THE DESTINATION have already run, and so
+    have the CMDB lookup and the policy check. Do not repeat those four.
+    Probing something ELSE is not a repeat and is part of this job: ping or
+    trace the NEXT HOP, or the destination from a different source interface,
+    or inside a different routing context. Those answer questions the first
+    probes did not, and you are expected to use them.
 R4. Three attempts at one question. Then move on and say which command the box
     refused, so the gap is visible rather than silently skipped.
 R5. Every thought, in this order: what the last output PROVED, what is still
@@ -475,6 +479,10 @@ has already settled it, and say so.
      global table.
    - choose the context by LONGEST PREFIX MATCH, never because it happens to
      have a default route.
+   - a listing may TRUNCATE long names to fit its column. A name that ends
+     mid-word, or on a hyphen or a dot, is cut off: confirm the full name
+     before you use it, and never report "no route" from a lookup in a name
+     you could not confirm.
 
 3. RESOLVE RECURSIVELY. A next hop that is not directly connected is itself
    reached through a route: look IT up the same way, and keep going until the

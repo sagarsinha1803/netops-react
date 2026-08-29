@@ -317,9 +317,14 @@ class Workflow:
                             "output": "", "step": len(self.checks) + 1})
         return len(self.checks) - 1
 
-    def finish_check(self, idx, ok, detail="", output="", status=None):
+    def finish_check(self, idx, ok, detail="", output="", status=None,
+                     answered=None):
         if 0 <= idx < len(self.checks):
             self.checks[idx]["status"] = status or ("done" if ok else "failed")
+            # Two different failures wore the same red cross: a device that
+            # REFUSED the command, and a command that ran and returned bad
+            # news. The first is a syntax problem, the second is the network.
+            self.checks[idx]["answered"] = answered
             self.checks[idx]["detail"] = detail
             if output:
                 self.checks[idx]["output"] = output[:2000]
@@ -336,9 +341,11 @@ class Workflow:
                             "step": len(self.basics) + 1})
         return len(self.basics) - 1
 
-    def finish_basic(self, idx, ok, detail="", device=None, output=""):
+    def finish_basic(self, idx, ok, detail="", device=None, output="",
+                     answered=None):
         if 0 <= idx < len(self.basics):
             self.basics[idx]["status"] = "done" if ok else "failed"
+            self.basics[idx]["answered"] = answered
             self.basics[idx]["detail"] = detail
             if device:
                 self.basics[idx]["device"] = device

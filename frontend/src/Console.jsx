@@ -110,10 +110,15 @@ function FeedRow({ row, showWhy }) {
   return (
     <div className="row">
       <div className="line" onClick={() => canOpen && setOpen(!open)}>
-        <div className={`st ${row.status}`}>
+        {/* A red cross means the device never answered -- it refused the
+            command. A command that RAN and came back with bad news (a ping
+            with no replies, a table with no route) is amber: the network is
+            the problem, not the syntax. */}
+        <div className={`st ${row.status}`
+          + (row.status === "failed" && row.answered ? " negative" : "")}>
           {row.status === "skipped" ? "–"
             : row.status === "done" ? "✓"
-              : row.status === "failed" ? "✕" : ""}
+              : row.status === "failed" ? (row.answered ? "!" : "✕") : ""}
         </div>
         <div className="cmd mono">{row.cmd}</div>
         {row.device && <div className="chip">{row.device}</div>}
