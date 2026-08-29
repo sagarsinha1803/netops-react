@@ -204,7 +204,10 @@ Routing entry for 10.40.20.0/24
 DC1-EDGE-RTR-01#show ip arp 10.20.10.254
 Internet  10.20.10.254        3  0050.56be.7f01  ARPA  TenGigabitEthernet0/0/0
 DC1-EDGE-RTR-01#show interfaces TenGigabitEthernet0/0/0
-TenGigabitEthernet0/0/0 is up, line protocol is up""", "10.20.10.254", True),
+TenGigabitEthernet0/0/0 is up, line protocol is up""", "10.20.10.254", None),
+    # None, not True: route + adjacency + interface prove the FIRST HOP. They
+    # say nothing about the destination, and a panel that draws an arrival
+    # nothing showed is worse than one that admits the gap.
 }
 
 print()

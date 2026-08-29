@@ -174,8 +174,17 @@ check("so the path ends in a question, not at the destination",
 confirmed = path_from_checks(
     [{"output": XR + "\nInternet 203.0.113.246 3 0050.56be.7f01 ARPA Te0/0/0/0"}],
     "edge-a1", "edge-a2")
-check("an ARP entry with a hardware address DOES settle it",
-      confirmed and confirmed["reached"] is True, confirmed and confirmed["line"])
+# An ARP entry with a hardware address proves the NEXT HOP is really there.
+# It does not prove the destination was reached -- a run whose own probe to
+# the destination went unanswered drew this green all the way through, which
+# contradicted its own report.
+check("an ARP entry proves the next hop, and the path stops there",
+      confirmed and confirmed["reached"] is None
+      and confirmed["nodes"][-1]["label"] == "?",
+      confirmed and confirmed["line"])
+check("and the note says that is the first hop and no more",
+      confirmed and "first hop" in confirmed["note"].lower(),
+      confirmed and confirmed["note"][:90])
 
 # SecureTrack lists the two ends and its own markers among the "devices"
 POLICY = json.dumps({"verdict": "ALLOWED",

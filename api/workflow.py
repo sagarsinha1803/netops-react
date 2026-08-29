@@ -1035,7 +1035,7 @@ def blockage(text, next_hop="", egress=""):
     for line in text.splitlines():
         if not _ARP_INCOMPLETE.search(line):
             continue
-        if re.search(r"arpa|arp|neighbou?r", line, re.I):
+        if re.search(r"arpa|\barp\b|neighbou?r", line, re.I):
             return (f"{next_hop} never answered ARP" if next_hop
                     else "the next hop never answered ARP")
     if _FIB_BROKEN.search(text):
@@ -1099,6 +1099,29 @@ def _connected_path(checks, src_label, dst_label, dest_addr):
             "note": (f"The two ends are directly connected through {intf}, but "
                      f"nothing here shows the interface up or the neighbour "
                      f"resolved -- check the interface and the ARP entry.")}
+
+def _probe_failed(checks, dst_label, dest_addr) -> str:
+    """The last probe that named the destination and got nothing back, or "".
+
+    Worth knowing separately from the tables. A source whose route, adjacency
+    and interface are all healthy has proved its FIRST HOP -- and if a probe to
+    the destination still went unanswered, that is the one piece of evidence
+    that says the packet did not arrive. Drawing the path green through to the
+    destination in the face of it contradicts the run that produced it.
+    """
+    target = str(dest_addr or "").strip()
+    for check in reversed(checks or []):
+        cmd = str(check.get("cmd") or "")
+        out = str(check.get("output") or "")
+        if not re.match(r"^\s*(execute\s+)?ping\b", cmd, re.I):
+            continue
+        named = [n for n in (target, dst_label) if n]
+        if named and not any(str(n) in cmd for n in named):
+            continue                            # a next-hop probe, not this
+        if usable_output(out, cmd) and not check_ok(out):
+            return cmd                          # it ran, and nothing came back
+    return ""
+
 
 def _probe_settled(checks, src_label, dst_label, dest_addr):
     """A path built from a PROBE the deeper checks ran, or None.
@@ -1324,6 +1347,9 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
     if not next_hop:
         return None
 
+    # a probe that named the destination, ran, and got nothing back
+    failed_probe = _probe_failed(checks, dst_label, dest_addr)
+
     unresolved = bool(_ARP_INCOMPLETE.search(text))
     down = [m.group(1) for m in _IF_DOWN.finditer(text)]
     # the route said which interface, or the only interface reported down is
@@ -1359,7 +1385,11 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
                              if blocked else
                              "The destination is directly attached, and the "
                              "link to it is down.")}
+        # an attached destination that answered ARP is as close as tables
+        # get -- but a probe to it that went unanswered still outranks them
         reached = bool(_ARP_RESOLVED.search(text) or _IF_UP.search(text))
+        if failed_probe:
+            reached = False
         nodes.append({"label": dst_label, "ip": None,
                       "kind": "dest" if reached else "unknown"})
         return {"nodes": nodes, "line": _line(nodes),
@@ -1398,11 +1428,22 @@ def path_from_checks(checks, src_label="source", dst_label="destination",
                 + " -- so nothing leaves here, whatever the policy allows.")
         reached = False
     elif confirmed:
-        nodes.append({"label": dst_label, "ip": None, "kind": "dest"})
+        # A healthy route, adjacency and interface prove the FIRST HOP and no
+        # more. They say nothing about what happens after it, so the path
+        # cannot be drawn through to the destination -- and certainly not in
+        # green in a run whose own probe to the destination went unanswered.
+        # Only a probe that got replies or a traceroute that arrived settles
+        # that, and both are read before this point.
+        nodes.append({"label": "?", "ip": None, "kind": "unknown"})
         note = ("The source's forwarding entry for the destination is complete: "
                 "next hop " + next_hop + (f" out {egress}" if egress else "")
-                + ", resolved and up.")
-        reached = True
+                + ", resolved and up. That proves the first hop and no more"
+                + (", and the probe to the destination still went unanswered "
+                   "-- so the fault is beyond this hop, not on it."
+                   if failed_probe else
+                   " -- nothing here shows the traffic arriving, so what "
+                   "happens after it is still open."))
+        reached = None
     else:
         nodes.append({"label": "?", "ip": None, "kind": "unknown"})
         note = ("The source forwards toward " + next_hop
