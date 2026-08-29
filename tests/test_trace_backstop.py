@@ -129,6 +129,37 @@ check("the path has hops to draw now",
 check("and the report survives the extra turn",
       str((wf.get("report") or {}).get("result") or "") == "NOT REACHABLE",
       str(wf.get("report"))[:80])
+check("nothing lands under DEEPER CHECKS before anyone asked for them",
+      not (wf.get("checks") or []),
+      str([c.get("cmd") for c in (wf.get("checks") or [])])[:90])
+
+
+# ---- a rejected attempt has not used up the stage -------------------------
+# The device refused the first traceroute -- wrong option for that platform --
+# and the stage counted it anyway. The retry, which is the same step in a
+# different dialect, was filed under DEEPER CHECKS: a different question, in a
+# different part of the panel, before the operator had asked for any.
+from api.workflow import Workflow                                # noqa: E402
+
+wf2 = Workflow()
+wf2.reset({"source": SRC, "dest": DST})
+
+FIRST = f"traceroute {DST} ttl 1 5 timeout 1 probe 1 numeric"
+RETRY = f"traceroute {DST} numeric"
+LATER = f"traceroute {DST} source Loopback0 numeric"
+
+check("the first attempt is the traceroute step",
+      wf2.classify(FIRST) == "trace", wf2.classify(FIRST))
+
+wf2.release_basic("trace")               # the device rejected it: no answer
+check("so is the next syntax it tries",
+      wf2.classify(RETRY) == "trace", wf2.classify(RETRY))
+check("and the first attempt is still remembered as what it was",
+      wf2.classify(FIRST) == "trace", wf2.classify(FIRST))
+
+# that one ANSWERED, so the stage is settled and anything further is digging
+check("once the stage has an answer, more tracing is escalation",
+      wf2.classify(LATER) == "deep", wf2.classify(LATER))
 
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")

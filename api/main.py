@@ -221,9 +221,18 @@ async def drive(sess: Session, app_graph, config, first_input,
                     detail = failed_line(body) or (useful or lines or [""])[0]
                     # a command is "ok" only if it both ANSWERED and succeeded:
                     # a refusal, a permission error or silence is not a result
-                    ok = check_ok(body) and usable_output(body, echo)
-                    if not detail and not usable_output(body, echo):
+                    answered = usable_output(body, echo)
+                    ok = check_ok(body) and answered
+                    if not detail and not answered:
                         detail = "no output"
+                    # A rejected command has not answered the stage, so the
+                    # next syntax the model tries is still that stage. Left
+                    # claimed, the retry lands under DEEPER CHECKS -- a
+                    # different question, and one nobody asked for yet.
+                    if tid in basic_idx and not answered:
+                        stage = wf.basics[basic_idx[tid]].get("kind")
+                        if stage in ("ping", "trace"):
+                            wf.release_basic(stage)
                     if tid in check_idx:
                         wf.finish_check(check_idx[tid], ok, detail[:70],
                                         output=body)

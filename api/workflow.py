@@ -275,6 +275,18 @@ class Workflow:
         self._kind[command] = kind
         return kind
 
+    def release_basic(self, stage: str):
+        """Let the next attempt at this stage be the stage again.
+
+        A device that REJECTS a command has not answered it. The model's next
+        syntax is still the traceroute step -- the prompt allows it three
+        tries -- but the rejected first attempt had already claimed the slot,
+        so every retry was filed under DEEPER CHECKS. That is a different
+        question, in a different part of the panel, and it appeared there
+        before the operator had asked for any deeper checks at all.
+        """
+        self._basic_seen.discard(stage)
+
     def from_tool_call(self, name, args, command_text):
         """Mark the stage a tool call belongs to as running."""
         from agent.constants import ALERT_TOOL_NAMES, POLICY_TOOL_NAMES
