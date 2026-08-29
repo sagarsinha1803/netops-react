@@ -112,6 +112,25 @@ evidence about this host presented as evidence about the source. Set
 they take a validated IP argument only, the command line is assembled in code,
 and they stay approval-gated and audited as `agent host`.
 
+## "Server disconnected without sending a response"
+
+A traceback ending in `httpx.RemoteProtocolError`, raised somewhere under
+`mcp/client/sse.py`, is the SSH MCP server closing its HTTP connection. That
+server is reached over SSE, which is two requests -- a long-lived stream and
+the posts that ride alongside it -- and a recycled worker, a proxy idle
+timeout or an expiring keep-alive closes both.
+
+It is a transport hiccup, not a device or a command. Every call now retries
+three times with a short backoff, so a single drop costs nothing but a pause.
+The traceback is still printed by the MCP SDK's own background task and cannot
+be suppressed from here; the line that matters is the one after it. If a
+server drops all three, the panel says so in those words and the run continues
+with the tools that are up.
+
+If it happens on every run rather than occasionally, the connection is being
+closed deliberately -- check the idle timeout on whatever proxies
+`SSH_MCP_URL`, or set `SSH_MCP_TRANSPORT=stdio` to bypass it.
+
 ## Safety — unchanged from netops
 
 Read-only allowlist in code, human approval on every device command, Tufin

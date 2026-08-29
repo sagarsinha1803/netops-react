@@ -136,6 +136,51 @@ def _why_dead(server: str, spec, error) -> str:
     return detail or "unreachable"
 
 
+# A connection that was dropped rather than an answer that was refused. An MCP
+# server reached over SSE is two HTTP requests -- a long-lived stream and the
+# posts that ride alongside it -- and anything between here and it (the server
+# recycling a worker, a proxy's idle timeout, a keep-alive expiring) can close
+# them. The next attempt opens a new one and usually just works, so treating it
+# as "that server is down" throws away a run over a hiccup.
+_DROPPED = ("remoteprotocolerror", "server disconnected", "connecterror",
+            "connecttimeout", "readerror", "readtimeout", "closedresource",
+            "peer closed", "connection reset", "broken pipe",
+            "incomplete chunked read")
+
+
+def _was_dropped(exc) -> bool:
+    """True when the transport failed, rather than the server saying no."""
+    seen, queue = set(), [exc]
+    while queue:
+        err = queue.pop()
+        if err is None or id(err) in seen:
+            continue
+        seen.add(id(err))
+        blob = f"{type(err).__name__} {err}".lower()
+        if any(word in blob for word in _DROPPED):
+            return True
+        queue.extend(getattr(err, "exceptions", None) or [])
+        queue.extend([getattr(err, "__cause__", None),
+                      getattr(err, "__context__", None)])
+    return False
+
+
+async def _retrying(what, attempts: int = 3, delay: float = 0.6):
+    """Run an awaitable factory, trying again when the transport drops."""
+    last = None
+    for attempt in range(attempts):
+        try:
+            return await what()
+        except Exception as e:                   # noqa: BLE001 -- re-raised below
+            last = e
+            if not _was_dropped(e) or attempt == attempts - 1:
+                raise
+            print(f"[MCP] connection dropped ({type(e).__name__}); "
+                  f"retrying {attempt + 1}/{attempts - 1}", file=sys.stderr)
+            await asyncio.sleep(delay * (attempt + 1))
+    raise last                                   # unreachable, kept explicit
+
+
 async def _load_tools(client):
     """Return (tools, owner, failed).
 
@@ -146,7 +191,7 @@ async def _load_tools(client):
     tools, owner, failed = [], {}, {}
     for server in C.MCP_SERVERS:
         try:
-            got = await client.get_tools(server_name=server)
+            got = await _retrying(lambda s=server: client.get_tools(server_name=s))
         except TypeError as e:
             # Only an adapter that does not accept server_name should land here.
             # Catching every TypeError swallowed errors raised INSIDE get_tools
@@ -161,7 +206,9 @@ async def _load_tools(client):
             got = await client.get_tools()
             return got, {}, {}               # unknown origin -> deny by default
         except Exception as e:               # unreachable / crashed MCP server
-            msg = _why_dead(server, C.MCP_SERVERS.get(server), e)
+            msg = ("dropped the connection three times -- it is up but not "
+                   "holding a session open" if _was_dropped(e)
+                   else _why_dead(server, C.MCP_SERVERS.get(server), e))
             failed[server] = msg
             print(f"[MCP] server '{server}' unavailable: {msg}", file=sys.stderr)
             continue
@@ -442,9 +489,16 @@ async def build_agent(checkpointer=None):
                 result = f"unknown tool '{name}' (have: {sorted(by_name)})"
             else:
                 try:
-                    result = await by_name[name].ainvoke(args)
+                    # a dropped connection is not an answer: open another one
+                    result = await _retrying(
+                        lambda n=name, a=args: by_name[n].ainvoke(a))
                 except Exception as e:
-                    result = f"error calling {name}: {e}"
+                    result = (
+                        f"the {owner.get(name, 'MCP')} server dropped the "
+                        f"connection three times, so {name} did not run. It is "
+                        f"reachable but not holding a session open; this says "
+                        f"nothing about the device."
+                        if _was_dropped(e) else f"error calling {name}: {e}")
 
             text = tool_text(result)
             if tid in trimmed and gate is True:
