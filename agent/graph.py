@@ -401,18 +401,19 @@ async def build_agent(checkpointer=None):
                 # the run mid-ladder and prints braces where the report goes,
                 # which is the worst of both. Ask once, for the same step,
                 # written so it can be read.
-                print("[LLM] a reply that reads like a tool call would not "
-                      "parse -- asking once more for the same step",
-                      file=sys.stderr)
+                print("[LLM] a reply that meant to run something ran nothing "
+                      "-- asking once more for the same step", file=sys.stderr)
                 again = await llm_with_tools.ainvoke(
                     list(msgs) + [AIMessage(content=str(reply.content or "")),
                                   ("user",
-                                   "That reply could not be read as JSON, so "
-                                   "nothing was run and the investigation is "
-                                   "exactly where it was. Send the SAME step "
-                                   "again as ONE JSON object and nothing else: "
-                                   "no prose around it, no bold, and check "
-                                   "that every brace and bracket closes.")])
+                                   "You described a step but did not take it: "
+                                   "no tool was called, nothing ran, and the "
+                                   "investigation is exactly where it was. "
+                                   "Saying you will call something is not "
+                                   "calling it. Make that SAME call now -- as a "
+                                   "real tool call if you can, otherwise as ONE "
+                                   "JSON object and nothing else, with no prose "
+                                   "around it and every brace closed.")])
                 if getattr(again, "tool_calls", None):
                     reply = again
                 else:

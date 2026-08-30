@@ -117,6 +117,37 @@ check("...and is still refused by the allowlist",
       bool(check_command("configure terminal")),
       "the salvage path must not be a way around the guard")
 
+# ---- announced, and then not done ----------------------------------------
+# The one that wasted a whole run: no JSON anywhere, just a model narrating
+# the step it was about to take. Nothing to salvage -- but "there is nothing
+# runnable here" and "this is the final answer" are not the same thing, and
+# treating the second as the first left every stage grey.
+from agent.salvage import looks_like_a_call                     # noqa: E402
+
+ANNOUNCED = """Thought: I need to first gather device details for both the source (EDGE-A1) and destination (EDGE-B2) to understand their configurations and management IPs. I will start by calling the get_device_details function for EDGE-A1.
+
+Now, I will proceed with the first step.
+
+Calling get_device_details for EDGE-A1."""
+
+check("an announced call carries nothing to salvage",
+      salvage_tool_call(ANNOUNCED, TOOLS) is None,
+      str(salvage_tool_call(ANNOUNCED, TOOLS)))
+check("but it is recognised as a step that meant to happen",
+      looks_like_a_call(ANNOUNCED, TOOLS), "so the graph asks once more")
+
+# and the things that must NOT be re-asked, or a model gets talked out of an
+# answer it already had
+for finished in [
+    "The link is down; policy permits the traffic.",
+    '{"result": "NOT REACHABLE", "cause": "Ethernet1/2 is down"}',
+    "I ran get_device_details and the result is INCONCLUSIVE.",
+    "Next step is for a human: raise a ticket with the transport team.",
+    "I will now summarise what the checks showed.",
+]:
+    check(f"a finished answer is left alone: {finished[:38]!r}",
+          not looks_like_a_call(finished, TOOLS))
+
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")
 sys.exit(1 if fails else 0)

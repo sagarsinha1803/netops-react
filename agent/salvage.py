@@ -27,6 +27,14 @@ from agent.llm.clipboard_llm import _extract_json
 # ```json ... ``` first, then any bare {...}
 _FENCED = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 
+# A model saying it is about to do the thing, instead of doing it. Present
+# tense or future, first person -- the wording every model reaches for when it
+# narrates a step it then forgets to take.
+_ANNOUNCING = re.compile(
+    r"\b(?:i(?:'| a)?m going to|i will|i'll|let me|let's|now[, ]|next[, ]|"
+    r"start(?:ing)? (?:with|by)|proceed(?:ing)? with|"
+    r"call(?:ing)?|invok(?:e|ing)|us(?:e|ing)|run(?:ning)?)\b", re.I)
+
 
 def _args_from(text: str):
     """The first JSON object in the text, whatever it is wrapped in."""
@@ -126,8 +134,24 @@ def looks_like_a_call(text, tool_names):
     report belongs. Worth one more ask before accepting that as the end.
     """
     body = str(text or "")
-    if "{" not in body:
+    if not body.strip():
         return False
-    if _args_from(body) is not None:
-        return False                            # it parsed; it was just not a call
-    return '"tool"' in body or any(name in body for name in tool_names)
+    # A reply that reached a VERDICT is finished, whatever else it mentions.
+    # Re-asking one of those would talk a model out of an answer it had.
+    if re.search(r'"result"\s*:|\b(NOT )?REACHABLE\b|\bINCONCLUSIVE\b', body):
+        return False
+
+    named = [n for n in tool_names if n in body]
+
+    # Shape one: an object naming a tool that will not parse -- a brace too
+    # many, a paste cut short.
+    if "{" in body and _args_from(body) is None:
+        if '"tool"' in body or named:
+            return True
+
+    # Shape two, and the more embarrassing: no object at all. The model
+    # ANNOUNCES the step in prose -- "Now, I will proceed with the first step.
+    # Calling get_device_details for EDGE-A1." -- and calls nothing. Every
+    # stage stays grey and the announcement becomes the final answer, which
+    # reads as a run that decided a device lookup was the whole job.
+    return bool(named and _ANNOUNCING.search(body))
