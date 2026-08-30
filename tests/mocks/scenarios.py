@@ -30,6 +30,8 @@ Three scenarios:
 
 Every device is reachable by NAME or by IP: the CMDB mock indexes both.
 """
+import datetime as _dt
+
 
 # --------------------------------------------------------------- inventory --
 # name -> the few facts the CMDB mock turns into a full record
@@ -123,6 +125,17 @@ POLICY_RULES = {
     "10.60.40.12": "PERMIT-DB-REPLICATION",
 }
 
+def _raised(days_ago, hour=9):
+    """A created time that many days back, in the shape the database returns.
+
+    Relative rather than fixed, so the mock alerts do not silently age past
+    every filter the day after they are written.
+    """
+    when = (_dt.datetime.now() - _dt.timedelta(days=days_ago)).replace(
+        hour=hour, minute=17, second=4, microsecond=0)
+    return when.strftime("%Y-%m-%d %H:%M:%S")
+
+
 # -------------------------------------------------------------- open alerts --
 ALERTS = {
     # scenario 1: one alert, on an interface that is NOT in the path. The
@@ -132,7 +145,7 @@ ALERTS = {
         {"alert_id": "3f21a8c4-0000-1111-2222-444444444444",
          "device_name": "DC2-WEB-LB-01", "alert_type": "environment",
          "alert_title": "PowerSupplyRedundancyLost",
-         "check_name": "PSU 2", "ticket_id": "570000114"},
+         "check_name": "PSU 2", "ticket_id": "570000114", "severity": "warning", "alert_time": _raised(6)},
     ],
 
     # scenario 2: the smoking gun. The interface named here is the same one
@@ -141,15 +154,15 @@ ALERTS = {
         {"alert_id": "b81c07de-0000-1111-2222-555555555555",
          "device_name": "DC1-APP-SW-07", "alert_type": "network",
          "alert_title": "LinkStatusOperDown",
-         "check_name": "Interface TenGigE0/0/0/3", "ticket_id": "570000231"},
+         "check_name": "Interface TenGigE0/0/0/3", "ticket_id": "570000231", "severity": "critical", "alert_time": _raised(0)},
         {"alert_id": "b81c1a55-0000-1111-2222-555555555555",
          "device_name": "DC1-APP-SW-07", "alert_type": "network",
          "alert_title": "BGPNeighborDown",
-         "check_name": "Neighbor 10.20.30.129", "ticket_id": "570000231"},
+         "check_name": "Neighbor 10.20.30.129", "ticket_id": "570000231", "severity": "critical", "alert_time": _raised(0)},
         {"alert_id": "c40d99f1-0000-1111-2222-555555555555",
          "device_name": "DC1-APP-SW-07", "alert_type": "network",
          "alert_title": "InterfaceErrorRateHigh",
-         "check_name": "Interface TenGigE0/0/0/3", "ticket_id": "570000232"},
+         "check_name": "Interface TenGigE0/0/0/3", "ticket_id": "570000232", "severity": "warning", "alert_time": _raised(3)},
     ],
 
     # scenario 3: unchanged, the tests script against these
@@ -157,21 +170,21 @@ ALERTS = {
         {"alert_id": "9a7fc3aa-0000-1111-2222-333333333333",
          "device_name": "APP-SRV-DC1-020", "alert_type": "network",
          "alert_title": "LinkStatusOperDown",
-         "check_name": "Interface Bundle-Ether90", "ticket_id": "560000001"},
+         "check_name": "Interface Bundle-Ether90", "ticket_id": "560000001", "severity": "critical", "alert_time": _raised(2)},
         {"alert_id": "9a7ff104-0000-1111-2222-333333333333",
          "device_name": "APP-SRV-DC1-020", "alert_type": "network",
          "alert_title": "LinkStatusOperDown",
-         "check_name": "Interface TenGigE0/0/0/14", "ticket_id": "560000001"},
+         "check_name": "Interface TenGigE0/0/0/14", "ticket_id": "560000001", "severity": "major", "alert_time": _raised(8)},
         {"alert_id": "fc23e54e-0000-1111-2222-333333333333",
          "device_name": "APP-SRV-DC1-020", "alert_type": "network",
          "alert_title": "InterfaceAlert",
-         "check_name": "Interface Bundle-Ether20.3003", "ticket_id": "560000002"},
+         "check_name": "Interface Bundle-Ether20.3003", "ticket_id": "560000002", "severity": "warning", "alert_time": _raised(14)},
     ],
     "PAY-API-DC2-010": [
         {"alert_id": "a2f5d3a6-0000-1111-2222-333333333333",
          "device_name": "PAY-API-DC2-010", "alert_type": "network",
          "alert_title": "InterfaceAlert",
-         "check_name": "Interface TenGigE0/0/0/5", "ticket_id": "560000003"},
+         "check_name": "Interface TenGigE0/0/0/5", "ticket_id": "560000003", "severity": "minor", "alert_time": _raised(1)},
     ],
 }
 

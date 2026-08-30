@@ -115,8 +115,57 @@ def _json_values(text):
 
 
 # the columns the table shows, in the order it shows them
-ALERT_COLUMNS = ("device_name", "alert_title", "check_name", "alert_type",
-                 "ticket_id", "alert_id")
+ALERT_COLUMNS = ("device_name", "severity", "alert_title", "check_name",
+                 "alert_type", "ticket_id", "alert_id", "alert_time")
+
+# How old an alert is, so the table can be filtered to the last day or ten.
+# Worked out here rather than in the browser: one place, one set of rules, and
+# a timestamp shape nobody anticipated shows up in a test rather than as an
+# empty table on somebody's screen.
+_TS_FORMATS = (
+    "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
+    "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%d-%b-%Y %H:%M:%S",
+)
+
+
+def alert_age_days(value):
+    """Whole days since `value`, or None when it cannot be read.
+
+    None matters as much as a number: a row whose timestamp nobody can parse
+    must never be HIDDEN by a filter. Showing an alert that might be old is a
+    nuisance; hiding one that is current is a fault.
+    """
+    import datetime as _dt
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        stamp = _dt.datetime.fromtimestamp(float(value), _dt.timezone.utc)
+        return max(0, (_dt.datetime.now(_dt.timezone.utc) - stamp).days)
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d{9,13}", text):              # epoch seconds or millis
+        seconds = float(text) / (1000.0 if len(text) > 10 else 1.0)
+        stamp = _dt.datetime.fromtimestamp(seconds, _dt.timezone.utc)
+        return max(0, (_dt.datetime.now(_dt.timezone.utc) - stamp).days)
+
+    cleaned = text.replace("Z", "+00:00").replace("T", " ")
+    stamp = None
+    try:
+        stamp = _dt.datetime.fromisoformat(cleaned)
+    except ValueError:
+        for shape in _TS_FORMATS:
+            try:
+                stamp = _dt.datetime.strptime(cleaned.split("+")[0].strip(), shape)
+                break
+            except ValueError:
+                continue
+    if stamp is None:
+        return None
+    now = _dt.datetime.now(stamp.tzinfo) if stamp.tzinfo else _dt.datetime.now()
+    return max(0, (now - stamp).days)
 
 
 def parse_alerts(blob):
@@ -168,6 +217,7 @@ def parse_alerts(blob):
             continue
         row = {k: ("" if item.get(k) is None else str(item.get(k)))
                for k in ALERT_COLUMNS}
+        row["age_days"] = alert_age_days(item.get("alert_time"))
         # keep anything the query returned that is not in the fixed column
         # list, so a schema that grows is visible rather than silently dropped
         extra = {k: str(v) for k, v in item.items() if k not in ALERT_COLUMNS}

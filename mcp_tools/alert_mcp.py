@@ -54,12 +54,14 @@ _SQL = """
            alert.alert_type as alert_type,
            alert.title      as alert_title,
            alert.check_name as check_name,
+           alert.status     as severity,
+           alert.time       as alert_time,
            ticket.ticket_id as ticket_id
       from public.alert alert
       join public.ticket ticket on ticket.id = alert.ticket_table_id
      where ticket.ticket_status = 'open_state'
        and upper(alert.name) = :device
-     order by alert.id
+     order by alert.time desc nulls last, alert.id
      limit :limit
 """
 

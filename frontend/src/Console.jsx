@@ -437,45 +437,127 @@ const REPORT_TABS = [
 // Open alerts from Archangel. A table rather than prose: an engineer scans for
 // the interface in the path and the ticket to open, and both are easier to find
 // in a column than in a sentence.
+// how the severity a device reports maps onto four colours. Anything the
+// estate calls something else keeps the neutral one rather than being guessed
+// at -- a wrong colour on a severity is worse than no colour.
+const SEVERITY = {
+  critical: "sev-critical", crit: "sev-critical", fatal: "sev-critical",
+  emergency: "sev-critical", sev1: "sev-critical", p1: "sev-critical",
+  major: "sev-major", high: "sev-major", error: "sev-major",
+  sev2: "sev-major", p2: "sev-major",
+  warning: "sev-warning", warn: "sev-warning", medium: "sev-warning",
+  minor: "sev-warning", sev3: "sev-warning", p3: "sev-warning",
+  info: "sev-info", informational: "sev-info", low: "sev-info",
+  notice: "sev-info", cleared: "sev-info", ok: "sev-info",
+};
+
+const AGES = [
+  { key: "all", label: "All", days: null },
+  { key: "1", label: "Last day", days: 1 },
+  { key: "5", label: "Last 5 days", days: 5 },
+  { key: "10", label: "Last 10 days", days: 10 },
+];
+
+function whenRaised(row) {
+  const age = row.age_days;
+  if (age === null || age === undefined) return row.alert_time || "unknown";
+  if (age === 0) return "today";
+  if (age === 1) return "yesterday";
+  return `${age} days ago`;
+}
+
 function AlertsTable({ alerts }) {
-  const rows = alerts || [];
-  if (!rows.length)
+  const all = alerts || [];
+  const [age, setAge] = useState("all");
+  if (!all.length)
     return (
       <div className="hint">
         No open alerts were returned for these devices — or the devices were
         not in the CMDB, so there was no name to look them up by.
       </div>
     );
+
+  const window = (AGES.find((a) => a.key === age) || {}).days;
+  // An alert whose timestamp could not be read is never hidden. Showing one
+  // that might be old is a nuisance; hiding one that is current is a fault.
+  const rows =
+    window === null || window === undefined
+      ? all
+      : all.filter(
+          (r) => r.age_days === null || r.age_days === undefined
+            || r.age_days < window,
+        );
+  const undated = rows.filter(
+    (r) => r.age_days === null || r.age_days === undefined).length;
   const tickets = [...new Set(rows.map((r) => r.ticket_id).filter(Boolean))];
+
   return (
     <>
-      <div className="hint" style={{ marginBottom: 8 }}>
-        {rows.length} open alert{rows.length === 1 ? "" : "s"}
-        {tickets.length
-          ? ` across ${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`
-          : ""}
+      <div className="alert-bar">
+        <div className="hint">
+          {rows.length} open alert{rows.length === 1 ? "" : "s"}
+          {tickets.length
+            ? ` across ${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`
+            : ""}
+          {rows.length !== all.length ? ` (of ${all.length})` : ""}
+          {window && undated
+            ? ` · ${undated} with no readable date, shown anyway`
+            : ""}
+        </div>
+        <div className="ages">
+          {AGES.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              className={`age${age === a.key ? " on" : ""}`}
+              onClick={() => setAge(a.key)}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="table-wrap">
-        <table className="alerts">
-          <thead>
-            <tr>
-              <th>Device</th><th>Alert</th><th>Check</th>
-              <th>Type</th><th>Ticket</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={r.alert_id || i} title={r.alert_id ? `alert ${r.alert_id}` : ""}>
-                <td className="mono">{r.device_name}</td>
-                <td>{r.alert_title}</td>
-                <td className="mono">{r.check_name}</td>
-                <td>{r.alert_type}</td>
-                <td className="mono">{r.ticket_id}</td>
+      {!rows.length ? (
+        <div className="hint">
+          Nothing raised in that window. {all.length} older alert
+          {all.length === 1 ? "" : "s"} {all.length === 1 ? "is" : "are"} still
+          open — widen the filter to see {all.length === 1 ? "it" : "them"}.
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table className="alerts">
+            <thead>
+              <tr>
+                <th>Device</th><th>Severity</th><th>Alert</th><th>Check</th>
+                <th>Type</th><th>Raised</th><th>Ticket</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.alert_id || i} title={r.alert_id ? `alert ${r.alert_id}` : ""}>
+                  <td className="mono">{r.device_name}</td>
+                  <td>
+                    {r.severity ? (
+                      <span
+                        className={`sev ${SEVERITY[String(r.severity).toLowerCase()] || "sev-unknown"}`}
+                      >
+                        {r.severity}
+                      </span>
+                    ) : (
+                      <span className="dim">—</span>
+                    )}
+                  </td>
+                  <td>{r.alert_title}</td>
+                  <td className="mono">{r.check_name}</td>
+                  <td>{r.alert_type}</td>
+                  <td title={r.alert_time || ""}>{whenRaised(r)}</td>
+                  <td className="mono">{r.ticket_id}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </>
   );
 }

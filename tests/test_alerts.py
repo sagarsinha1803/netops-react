@@ -78,11 +78,15 @@ parsed, message = parse_alerts("Error querying Archangel: connection refused")
 check("an error yields no rows and keeps the error",
       parsed == [] and "connection refused" in message, message[:40])
 
+# severity used to be the example here; it is a column of its own now, so the
+# point is made with a field nobody has asked for yet
 parsed, _ = parse_alerts(json.dumps([{"alert_id": "1", "ticket_id": "2",
-                                      "severity": "major"}]))
+                                      "assigned_group": "network-ops"}]))
 check("a column the query grew is kept, not silently dropped",
-      parsed and parsed[0].get("extra", {}).get("severity") == "major",
-      str(parsed[:1]))
+      parsed and parsed[0].get("extra", {}).get("assigned_group")
+      == "network-ops", str(parsed[:1]))
+check("while severity is a column in its own right now",
+      parsed and "severity" in parsed[0], str(parsed[:1])[:70])
 
 # ---- the stage ------------------------------------------------------------
 check("alerts is a stage in the strip",
@@ -110,6 +114,66 @@ check("its tool is named", C.ALERT_TOOL_NAMES ==
       {"get_alert_and_ticket_details_from_archangel"})
 check("it is NOT approval-gated: a read-only SELECT runs on no device",
       "archangel" not in C.DEVICE_SERVERS)
+
+# ---- severity, and how old the alert is -----------------------------------
+# The table gained a Severity column and a filter for the last day / five /
+# ten. Both come off the same reply: alert.status and alert.time.
+import datetime as _dt                                            # noqa: E402
+
+from api.workflow import alert_age_days                           # noqa: E402
+
+
+def _ago(days, shape="%Y-%m-%d %H:%M:%S"):
+    return (_dt.datetime.now() - _dt.timedelta(days=days, hours=1)).strftime(shape)
+
+
+check("today reads as nought days old", alert_age_days(_ago(0)) == 0,
+      str(alert_age_days(_ago(0))))
+check("yesterday reads as one", alert_age_days(_ago(1)) == 1,
+      str(alert_age_days(_ago(1))))
+check("a week ago reads as seven", alert_age_days(_ago(7)) == 7,
+      str(alert_age_days(_ago(7))))
+
+# the shapes a database or a driver can hand back for the same instant
+ISO_T = (_dt.datetime.now() - _dt.timedelta(days=3, hours=1)).isoformat()
+check("an ISO timestamp with a T is read",
+      alert_age_days(ISO_T) == 3, str(alert_age_days(ISO_T)))
+check("and one with a Z on the end",
+      alert_age_days(
+          (_dt.datetime.now(_dt.timezone.utc)
+           - _dt.timedelta(days=2, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")) == 2)
+check("and a bare date", alert_age_days(_ago(4, "%Y-%m-%d")) in (4, 5),
+      str(alert_age_days(_ago(4, "%Y-%m-%d"))))
+check("and epoch seconds",
+      alert_age_days(int((_dt.datetime.now(_dt.timezone.utc)
+                          - _dt.timedelta(days=5, hours=1)).timestamp())) == 5)
+
+# what must NOT happen: a filter hiding an alert because nobody could read its
+# date. An old alert shown is a nuisance; a current one hidden is a fault.
+for unreadable in (None, "", "   ", "not a date", "0000-00-00 00:00:00"):
+    check(f"an unreadable time is None, never a number: {unreadable!r}",
+          alert_age_days(unreadable) is None, str(alert_age_days(unreadable)))
+check("a time in the future does not read as negative",
+      alert_age_days(_ago(-5)) == 0, str(alert_age_days(_ago(-5))))
+
+# ---- and end to end, through the reply the tool actually sends -------------
+RAISED = _ago(6)
+WITH_SEVERITY = json.dumps([{
+    "alert_id": "1f0a-2b3c", "device_name": "EDGE-A1",
+    "alert_type": "network", "alert_title": "LinkStatusOperDown",
+    "check_name": "Interface Bundle-Ether7", "ticket_id": "560000009",
+    "severity": "critical", "alert_time": RAISED,
+}])
+rows, message = parse_alerts(WITH_SEVERITY)
+check("the severity reaches the table", rows and rows[0]["severity"] == "critical",
+      str(rows[:1])[:80])
+check("so does the time it was raised",
+      rows and rows[0]["alert_time"] == RAISED, str(rows[:1])[:80])
+check("and the age the filter works from",
+      rows and rows[0]["age_days"] == 6, str(rows[0].get("age_days")))
+check("a reply with neither still parses",
+      parse_alerts(json.dumps([{"alert_id": "x", "device_name": "EDGE-A1"}]))[0][0]
+      ["age_days"] is None)
 
 print()
 print("ALL PASSED" if not fails else f"FAILED: {fails}")
