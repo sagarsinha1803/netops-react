@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -393,7 +394,7 @@ async def build_agent(checkpointer=None):
                 reply = AIMessage(
                     content=str(reply.content or ""),
                     tool_calls=[{"name": name, "args": args,
-                                 "id": f"salvaged_{state.get('loops') or 0}"}])
+                                 "id": "salvaged_" + uuid.uuid4().hex[:12]}])
             elif looks_like_a_call(str(reply.content or ""), by_name):
                 # It meant to run something and the text will not parse as
                 # anything runnable. Accepting that as the final answer stops
@@ -421,7 +422,7 @@ async def build_agent(checkpointer=None):
                         reply = AIMessage(
                             content=str(again.content or ""),
                             tool_calls=[{"name": name, "args": args,
-                                         "id": f"repaired_{state.get('loops') or 0}"}])
+                                         "id": "repaired_" + uuid.uuid4().hex[:12]}])
 
         out: dict = {"messages": [reply]}
         if not getattr(reply, "tool_calls", None) and reply.content:

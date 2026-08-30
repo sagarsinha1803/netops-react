@@ -210,6 +210,90 @@ function listen(vscode) {
     server.close();
   }
 
+  // ============ a call nobody answered must not sink the request ==========
+  // The real failure: "Request Failed: 400 {"error":{"message":"No tool output
+  // found for function call salvaged_16."}}". One assistant tool call with no
+  // matching result -- or two calls sharing an id, so the second result
+  // overwrites the first -- and the whole conversation is refused. The history
+  // is worth less than the run, so the odd one out is dropped.
+  {
+    const model = makeModel({
+      script: () => [new LanguageModelTextPart("carrying on.")],
+    });
+    const { server, port } = await listen(makeVscode([model]));
+
+    await post(port, "/v1/chat/completions", {
+      messages: [
+        { role: "user", content: "troubleshoot" },
+        {
+          role: "assistant",
+          content: "Asking Tufin.",
+          tool_calls: [
+            { id: "answered", type: "function",
+              function: { name: "get_firewall_path", arguments: "{}" } },
+          ],
+        },
+        { role: "tool", tool_call_id: "answered", content: "ALLOWED" },
+        {
+          role: "assistant",
+          content: "And again, for the record.",
+          tool_calls: [
+            { id: "orphan", type: "function",
+              function: { name: "get_firewall_path", arguments: "{}" } },
+          ],
+        },
+      ],
+    });
+
+    const sent = model.seen[0].messages;
+    const partsOf = (m) => (Array.isArray(m.content) ? m.content : []);
+    const callIds = sent.flatMap((m) =>
+      partsOf(m).filter((p) => p.name).map((p) => p.callId ?? p.name));
+    const resultIds = sent.flatMap((m) =>
+      partsOf(m).filter((p) => p.callId && p.content).map((p) => p.callId));
+
+    check("the call that was answered still goes", () =>
+      assert.ok(sent.some((m) => partsOf(m).some(
+        (p) => p.name === "get_firewall_path"))));
+    check("every result still has its call", () =>
+      assert.equal(resultIds.filter((id) => id === "answered").length, 1));
+    check("the unanswered call is dropped rather than sent", () =>
+      assert.ok(!JSON.stringify(sent).includes("orphan")));
+    check("but what the model SAID alongside it survives", () =>
+      assert.ok(JSON.stringify(sent).includes("And again, for the record.")));
+    server.close();
+  }
+
+  // ============ two calls sharing an id: keep the first, drop the rest ====
+  {
+    const model = makeModel({
+      script: () => [new LanguageModelTextPart("ok")],
+    });
+    const { server, port } = await listen(makeVscode([model]));
+
+    const duplicate = (content) => ({
+      role: "assistant", content,
+      tool_calls: [{ id: "salvaged_16", type: "function",
+                     function: { name: "get_firewall_path", arguments: "{}" } }],
+    });
+    await post(port, "/v1/chat/completions", {
+      messages: [
+        { role: "user", content: "go" },
+        duplicate("first"),
+        { role: "tool", tool_call_id: "salvaged_16", content: "ALLOWED" },
+        duplicate("second"),
+        { role: "tool", tool_call_id: "salvaged_16", content: "ALLOWED again" },
+      ],
+    });
+
+    const sent = model.seen[0].messages;
+    const text = JSON.stringify(sent);
+    const calls = (text.match(/salvaged_16/g) || []).length;
+    check("an id is used once, so nothing is left looking unanswered", () =>
+      assert.equal(calls, 2));   // one call part, one result part
+    server.close();
+  }
+
   // ============================ model listing =============================
   {
     const models = [

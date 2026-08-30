@@ -261,6 +261,9 @@ class Workflow:
         if detail is not None:
             self.state[key]["detail"] = detail
 
+    # asking the box what it IS: identification, not an escalation
+    IDENTITY = re.compile(r"\b(version|inventory|system\s+status)\b", re.I)
+
     @staticmethod
     def stage_for(command: str, tool: str = "") -> str:
         c = f"{tool} {command}".lower()
@@ -277,6 +280,13 @@ class Workflow:
             return self._kind[command]      # asked again at the approval pause
         kind = "deep"
         if not deep_turn:
+            # Asking the box what it is happens BEFORE the checks and decides
+            # the syntax of all of them. Filing it under DEEPER CHECKS put it
+            # under a heading the operator had not opened, in a section that
+            # had not started.
+            if self.IDENTITY.search(command) and "route" not in command.lower():
+                self._kind[command] = "version"
+                return "version"
             stage = self.stage_for(command)
             if stage in ("ping", "trace") and stage not in self._basic_seen:
                 self._basic_seen.add(stage)

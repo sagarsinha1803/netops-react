@@ -26,6 +26,20 @@ function safeParse(value) {
  * message. Getting that wrong makes the model answer as if no tool had run.
  */
 function toLMMessages(vscode, messages) {
+  // Which calls actually have a result. A tool call with nothing answering it
+  // is refused upstream -- "No tool output found for function call <id>" --
+  // and the whole request dies, so one unmatched call takes down a
+  // conversation that was otherwise fine. The same happens when two calls
+  // share an id: the second result overwrites the first, and the first call
+  // is left looking unanswered. Dropping the odd one out costs the model a
+  // little history; keeping it costs the run.
+  const answered = new Set();
+  for (const m of messages || []) {
+    if (m && m.role === "tool" && m.tool_call_id) answered.add(m.tool_call_id);
+  }
+  const used = new Set();       // calls already sent
+  const returned = new Set();   // results already sent
+
   const out = [];
   for (const m of messages || []) {
     if (m.role === "system" || m.role === "user") {
@@ -34,7 +48,10 @@ function toLMMessages(vscode, messages) {
       // documents steering a request.
       out.push(vscode.LanguageModelChatMessage.User(String(m.content ?? "")));
     } else if (m.role === "assistant") {
-      const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+      const calls = (Array.isArray(m.tool_calls) ? m.tool_calls : []).filter(
+        (tc) => tc && answered.has(tc.id) && !used.has(tc.id),
+      );
+      calls.forEach((tc) => used.add(tc.id));
       if (calls.length) {
         const parts = [];
         if (m.content) parts.push(new vscode.LanguageModelTextPart(String(m.content)));
@@ -49,17 +66,29 @@ function toLMMessages(vscode, messages) {
           );
         }
         out.push(vscode.LanguageModelChatMessage.Assistant(parts));
+      } else if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+        // every call in it was dropped: keep whatever it SAID, so the reason
+        // it gave for the step is not lost along with the step
+        const said = String(m.content ?? "").trim();
+        if (said) out.push(vscode.LanguageModelChatMessage.Assistant(said));
       } else {
         out.push(vscode.LanguageModelChatMessage.Assistant(String(m.content ?? "")));
       }
     } else if (m.role === "tool") {
-      out.push(
-        vscode.LanguageModelChatMessage.User([
-          new vscode.LanguageModelToolResultPart(m.tool_call_id, [
-            new vscode.LanguageModelTextPart(String(m.content ?? "")),
+      // A result whose call was dropped -- or never sent -- is just as
+      // unmatched from the other side. And a second result for an id that has
+      // already been answered is the other half of the duplicate problem:
+      // upstream keeps one and the other call looks unanswered.
+      if (used.has(m.tool_call_id) && !returned.has(m.tool_call_id)) {
+        returned.add(m.tool_call_id);
+        out.push(
+          vscode.LanguageModelChatMessage.User([
+            new vscode.LanguageModelToolResultPart(m.tool_call_id, [
+              new vscode.LanguageModelTextPart(String(m.content ?? "")),
+            ]),
           ]),
-        ]),
-      );
+        );
+      }
     }
   }
   return out;

@@ -200,7 +200,12 @@ async def drive(sess: Session, app_graph, config, first_input,
                             cmd, where, args.get("region"), why,
                             said=said)
                     else:
-                        wf.from_tool_call(tc["name"], args, cmd)
+                        # asking the box what it is belongs in the activity
+                        # feed, but it is not one of the timeline's stages --
+                        # marking one running for it would light a step that
+                        # this command has nothing to do with
+                        if kind != "version":
+                            wf.from_tool_call(tc["name"], args, cmd)
                         basic_idx[tc.get("id")] = wf.add_basic(
                             cmd, where, args.get("region"), why, kind,
                             said=said)
