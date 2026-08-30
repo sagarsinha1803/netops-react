@@ -35,3 +35,9 @@ frontend/dist/
 # config backups: same reason as .env itself
 .env.*
 !.env.example
+
+# What has worked on this estate's platforms, written by the agent
+# itself. Only shapes are stored -- addresses, interfaces and names are
+# masked out -- but it is learned from YOUR devices, so it stays on the
+# machine that learned it unless you decide otherwise.
+data/command_notebook.json

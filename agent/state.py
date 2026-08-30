@@ -13,4 +13,7 @@ class NetState(TypedDict, total=False):
     ping_ok: Optional[bool]    # parsed from the ping output
     hops: list                 # parsed from the traceroute output
     path: str                  # "src -> hop -> ... -> dst"
+    platform: str              # what the SOURCE turned out to be, as the
+                               # notebook keys it -- read from the CMDB
+                               # record, corrected by the box itself
     answer: str                # final text from the agent

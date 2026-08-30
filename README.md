@@ -131,6 +131,44 @@ If it happens on every run rather than occasionally, the connection is being
 closed deliberately -- check the idle timeout on whatever proxies
 `SSH_MCP_URL`, or set `SSH_MCP_TRANSPORT=stdio` to bypass it.
 
+## The command notebook
+
+The agent works out each command from the platform in front of it. That is the
+right design -- a syntax table written by hand is stale the day it is written
+and only covers the vendors whoever wrote it thought of -- but it means every
+run rediscovers the same dialect, and a small model rediscovers it badly.
+
+So the agent keeps notes. Nobody fills them in:
+
+* right after the CMDB lookup it asks the SOURCE what it is (its version
+  command). The record is what somebody typed into a form; the box is the
+  authority, and a mismatch between the two is reported as a finding;
+* when a command runs and answers, its SHAPE is written down against that
+  platform -- `show ip route <addr> vrf <name>`, never the address it ran
+  against;
+* when a platform refuses one, that is written down too;
+* the next run on that kind of box gets both lists alongside the first device
+  output, so it starts from what your estate has already accepted.
+
+It is not the model learning -- swap the model and the notes still apply. It is
+not a curated table -- it knows nothing on day one and only ever contains
+commands your devices answered. And it is not a way past the guards: a
+remembered command goes through the read-only allowlist and the approval card
+like any other, so nothing enters the notebook that a human did not approve at
+least once.
+
+Addresses, interfaces, VRF and ACL names are masked out of every entry, so the
+file holds syntax and nothing identifying. It is still gitignored by default --
+it is learned from your estate, and that is your call to make, not the repo's.
+
+    data/command_notebook.json      the notes; safe to delete, it rebuilds
+    NOTEBOOK_PATH=...               keep them somewhere else
+    NOTEBOOK=0                      turn it off entirely
+
+What it does not fix: the first run against a vendor you have never touched,
+and the model's judgement about WHICH check to run. It removes the wasted
+steps, not the thinking.
+
 ## Safety — unchanged from netops
 
 Read-only allowlist in code, human approval on every device command, Tufin

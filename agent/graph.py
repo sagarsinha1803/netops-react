@@ -20,6 +20,7 @@ Two guards, because the model is choosing commands that run on real devices:
 """
 import asyncio
 import os
+import re
 import subprocess
 import sys
 from typing import Any
@@ -35,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent import constants as C            # noqa: E402
 from agent import prompts                   # noqa: E402
 from agent.guards import check_command      # noqa: E402
+from agent import notebook                 # noqa: E402
 from agent.salvage import (looks_like_a_call,       # noqa: E402
                            salvage_tool_call)
 from agent.state import NetState            # noqa: E402
@@ -312,6 +314,28 @@ def _ran_so_far(messages, limit: int = 20):
     return seen[-limit:]
 
 
+notes = notebook.shared()          # what has worked on this estate before
+
+# A command "answered" for the notebook's purposes when the device came back
+# with something other than a refusal. Deliberately not the same test the
+# panel uses for a green tick: a ping that answers "0 received" is a FAILED
+# probe and a perfectly good command, and the notebook is about syntax.
+_REFUSED = re.compile(
+    r"%\s*(invalid|incomplete|ambiguous|permission|error)"
+    r"|syntax error|unknown command|unrecognized command"
+    r"|command not found|not supported|invalid input", re.I)
+
+
+def _answered(text: str, command: str) -> bool:
+    body = str(text or "")
+    if _REFUSED.search(body):
+        return False
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    echo = " ".join(str(command or "").split()).lower()
+    lines = [ln for ln in lines if echo not in " ".join(ln.split()).lower()]
+    return bool(lines)
+
+
 LAST_FAILED_SERVERS: dict = {}     # set by build_agent, read by the UI
 
 # name -> tool, for the few steps the API layer runs ITSELF when the model
@@ -500,15 +524,52 @@ async def build_agent(checkpointer=None):
                         f"nothing about the device."
                         if _was_dropped(e) else f"error calling {name}: {e}")
 
+            # `text` is what the tool actually said and is what everything
+            # PARSES: the CMDB record must still be the JSON object it was, or
+            # cmdb_record() reads a perfectly good lookup as "not found".
+            # `shown` is that plus anything the model needs told alongside it.
             text = tool_text(result)
+            shown = text
             if tid in trimmed and gate is True:
                 # say which half of the call was dropped, or the model reads
                 # the shorter output as the device having answered less
-                text = ("NOT RUN AGAIN, already run earlier in this "
-                        "investigation: " + "; ".join(trimmed[tid][1]) +
-                        ". Their output stands. What follows is only the "
-                        "part of this call that was new.\n\n"
-                        + _ran_note(state["messages"]) + text)
+                shown = ("NOT RUN AGAIN, already run earlier in this "
+                         "investigation: " + "; ".join(trimmed[tid][1]) +
+                         ". Their output stands. What follows is only the "
+                         "part of this call that was new.\n\n"
+                         + _ran_note(state["messages"]) + shown)
+
+            # ---- the notebook ------------------------------------------
+            # What the box says it is beats what the CMDB says it is, so the
+            # platform is re-read from every result that could name it. Then:
+            # write down whether this shape answered on this platform, and --
+            # the moment the platform becomes known -- hand back what has
+            # worked on it before. That rides on the tool result rather than a
+            # message of its own, so it costs no extra turn and cannot shift
+            # the relay's count of what it has already pasted.
+            if gate is True and not isinstance(gate, tuple):
+                seen_platform = notebook.platform_of(
+                    record=text if not touches_device(name) else "",
+                    version_output=text if touches_device(name) else "")
+                if seen_platform:
+                    known = upd.get("platform") or state.get("platform") or ""
+                    # a version reply outranks a CMDB record: it is the box
+                    # itself talking, and the record may be years out of date
+                    if touches_device(name) or not known:
+                        upd["platform"] = seen_platform
+                platform = upd.get("platform") or state.get("platform") or ""
+
+                if touches_device(name) and platform:
+                    for command in commands_of(args):
+                        notes.record(platform, command,
+                                     worked=_answered(text, command))
+
+                # Only ever onto DEVICE output. A CMDB or Tufin reply is a JSON
+                # object that the panel parses, and a note appended to one
+                # turns a perfectly good record into "not found in CMDB".
+                hints = notes.hints(platform) if touches_device(name) else ""
+                if hints:
+                    shown = shown + "\n\n" + hints
 
             # Register the names in this result so the relay can swap them out
             # of the next paste. Done here, where results are still structured,
@@ -520,7 +581,8 @@ async def build_agent(checkpointer=None):
                     print(f"[mask] could not learn from {name}: {e}",
                           file=sys.stderr)
 
-            out_msgs.append(ToolMessage(content=text, name=name, tool_call_id=tid))
+            out_msgs.append(ToolMessage(content=shown, name=name,
+                                        tool_call_id=tid))
 
             if isinstance(gate, tuple):
                 pass                            # a repeat ran nothing to audit

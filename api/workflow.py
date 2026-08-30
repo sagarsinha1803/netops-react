@@ -69,6 +69,15 @@ def cmdb_record(blob):
                 break
         except Exception:
             continue
+    if data is None:
+        # something was appended after the object -- read just the object.
+        # A record is not "not found" because a note followed it.
+        try:
+            data, _end = json.JSONDecoder().raw_decode(body)
+        except Exception:                    # noqa: BLE001 -- genuinely not JSON
+            data = None
+        if not isinstance(data, dict):
+            data = None
     if not data:
         return False, ""
     record = data.get("data") if isinstance(data.get("data"), dict) else data

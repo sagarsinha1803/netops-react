@@ -20,7 +20,11 @@ _BLOCKED = re.compile(
 # Allowed only when narrowed by an argument or piped through a filter.
 _BULK = re.compile(
     r"^\s*show\s+("
-    r"run(ning-config)?|tech(-support)?|config(uration)?|logging|version\s*$|"
+    # NOT version. It is a few dozen lines on every platform, and it is the one
+    # command that says what the box actually IS -- which decides the syntax of
+    # every command after it. Blocking it left the agent guessing the dialect
+    # from a CMDB record somebody typed by hand, possibly years ago.
+    r"run(ning-config)?|tech(-support)?|config(uration)?|logging|"
     r"route\s*$|route\s+(ipv4|ipv6|vrf\s+\S+)?\s*$|"
     r"bgp\s*$|bgp\s+(ipv4|vpnv4|vrf\s+\S+)?\s*(unicast)?\s*$|"
     r"cef\s*$|arp\s*$|mpls\s+forwarding\s*$|"

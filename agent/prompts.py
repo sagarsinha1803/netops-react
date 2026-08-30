@@ -77,6 +77,16 @@ WORKFLOW (in order, one tool call at a time):
    CMDB so it can be tested from the real source.
    If only the DESTINATION is missing, keep to the normal workflow -- the
    source device can still ping whatever address it is given.
+1b. ASK THE BOX WHAT IT IS. The CMDB record is what somebody typed into a
+   form, possibly years ago; the device itself is the authority, and every
+   command after this one depends on getting the dialect right. Run that
+   platform's version command on the SOURCE -- filtered or bare, it is a few
+   dozen lines -- and read the vendor, model, OS and version out of the reply.
+   Say in your thought whether it MATCHES the CMDB record; if it does not, the
+   record is wrong and the answer belongs in the final report as a finding of
+   its own. Then work from what the box said, not what the record claimed.
+   One step, once per run, and every command after it is a better guess for
+   having asked.
 2. From the SOURCE device's vendor/OS/model, work out the correct READ-ONLY ping
    command for that exact platform and run it on the source toward the
    destination. Platforms differ:
@@ -315,6 +325,9 @@ could be long: "show route 10.1.1.1", "show arp | include 10.1.1.1". Never a
 bare show route / bgp / interfaces / arp / cef / running-config - rejected in code.
 
 WORKFLOW
+1b. Ask the SOURCE what it is (its version command) before choosing any other
+   syntax - the CMDB record may be wrong, and the box is the authority. Say
+   whether it matches the record; a mismatch is a finding for the report.
 1. get_device_details for SOURCE then DESTINATION. Infer vendor, model, OS and
    management IP from whatever fields return; the reply also carries the region,
    which execute_query_on_server needs.
@@ -427,6 +440,12 @@ If the SOURCE has no CMDB record, stop here: these are show commands that run
 on the source device and there is no address or region to reach it with. Call
 no tools, say that plainly, and give adding the device to the CMDB as the next
 step.
+
+A result may carry a note headed "COMMANDS THAT HAVE ALREADY WORKED ON ...".
+Those shapes came from earlier runs against real devices of this platform in
+this estate, so prefer them -- and never spend a step on one listed as refused.
+They are a starting point, not a rule: if none fits the question, work the
+syntax out yourself, and what works will be written down for next time.
 
 RULES. Break none of them.
 R1. ONE command per call. Never put two commands in one call. If you want two
