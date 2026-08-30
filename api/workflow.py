@@ -128,6 +128,36 @@ _TS_FORMATS = (
 )
 
 
+def _epoch_seconds(value):
+    """A count of seconds since 1970 out of `value`, or None.
+
+    The column is epoch, and epoch arrives in more shapes than it has any
+    right to: an int, a float, a Decimal when the column is `numeric`, or the
+    string any of those become on the way through. The UNIT varies too --
+    seconds, milliseconds, sometimes microseconds -- and it is not declared
+    anywhere, so it is read from the magnitude. Seconds now is about 1.7e9;
+    milliseconds 1.7e12; microseconds 1.7e15. Anything outside a sane range is
+    not a timestamp and is better refused than turned into 1970.
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        text = str(value or "").strip()
+        if not re.fullmatch(r"\d+(?:\.\d+)?", text):
+            return None
+        number = float(text)
+    if number <= 0:
+        return None
+    if number > 1e14:                     # microseconds
+        number /= 1e6
+    elif number > 1e11:                   # milliseconds
+        number /= 1e3
+    # 1e6 is 1970; 4e9 is 2096. Outside that it is an id, not a time.
+    return number if 1e6 < number < 4e9 else None
+
+
 def alert_age_days(value):
     """Whole days since `value`, or None when it cannot be read.
 
@@ -137,20 +167,17 @@ def alert_age_days(value):
     """
     import datetime as _dt
 
-    if value in (None, ""):
+    if value is None or value == "":
         return None
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        stamp = _dt.datetime.fromtimestamp(float(value), _dt.timezone.utc)
+
+    seconds = _epoch_seconds(value)
+    if seconds is not None:
+        stamp = _dt.datetime.fromtimestamp(seconds, _dt.timezone.utc)
         return max(0, (_dt.datetime.now(_dt.timezone.utc) - stamp).days)
 
     text = str(value).strip()
     if not text:
         return None
-    if re.fullmatch(r"\d{9,13}", text):              # epoch seconds or millis
-        seconds = float(text) / (1000.0 if len(text) > 10 else 1.0)
-        stamp = _dt.datetime.fromtimestamp(seconds, _dt.timezone.utc)
-        return max(0, (_dt.datetime.now(_dt.timezone.utc) - stamp).days)
-
     cleaned = text.replace("Z", "+00:00").replace("T", " ")
     stamp = None
     try:
@@ -166,6 +193,22 @@ def alert_age_days(value):
         return None
     now = _dt.datetime.now(stamp.tzinfo) if stamp.tzinfo else _dt.datetime.now()
     return max(0, (now - stamp).days)
+
+
+def alert_raised_at(value) -> str:
+    """The created time as a person reads it, or "" .
+
+    An epoch column shows up in the panel as "1756512345", which tells an
+    operator nothing. The raw value stays in the row as evidence; this is what
+    the tooltip shows.
+    """
+    import datetime as _dt
+
+    seconds = _epoch_seconds(value)
+    if seconds is None:
+        return str(value or "").strip()   # already a readable timestamp
+    return _dt.datetime.fromtimestamp(
+        seconds, _dt.timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def parse_alerts(blob):
@@ -218,6 +261,7 @@ def parse_alerts(blob):
         row = {k: ("" if item.get(k) is None else str(item.get(k)))
                for k in ALERT_COLUMNS}
         row["age_days"] = alert_age_days(item.get("alert_time"))
+        row["raised_at"] = alert_raised_at(item.get("alert_time"))
         # keep anything the query returned that is not in the fixed column
         # list, so a schema that grows is visible rather than silently dropped
         extra = {k: str(v) for k, v in item.items() if k not in ALERT_COLUMNS}

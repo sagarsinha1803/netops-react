@@ -128,12 +128,15 @@ POLICY_RULES = {
 def _raised(days_ago, hour=9):
     """A created time that many days back, in the shape the database returns.
 
+    EPOCH SECONDS, because that is what the real alert.time column holds --
+    the mock is worth little if it hands back a shape production never sends.
+
     Relative rather than fixed, so the mock alerts do not silently age past
     every filter the day after they are written.
     """
     when = (_dt.datetime.now() - _dt.timedelta(days=days_ago)).replace(
         hour=hour, minute=17, second=4, microsecond=0)
-    return when.strftime("%Y-%m-%d %H:%M:%S")
+    return int(when.timestamp())
 
 
 # -------------------------------------------------------------- open alerts --

@@ -460,7 +460,9 @@ const AGES = [
 
 function whenRaised(row) {
   const age = row.age_days;
-  if (age === null || age === undefined) return row.alert_time || "unknown";
+  // raised_at is the readable form; alert_time may be a raw epoch number,
+  // which tells an operator nothing
+  if (age === null || age === undefined) return row.raised_at || "unknown";
   if (age === 0) return "today";
   if (age === 1) return "yesterday";
   return `${age} days ago`;
@@ -550,7 +552,7 @@ function AlertsTable({ alerts }) {
                   <td>{r.alert_title}</td>
                   <td className="mono">{r.check_name}</td>
                   <td>{r.alert_type}</td>
-                  <td title={r.alert_time || ""}>{whenRaised(r)}</td>
+                  <td title={r.raised_at || r.alert_time || ""}>{whenRaised(r)}</td>
                   <td className="mono">{r.ticket_id}</td>
                 </tr>
               ))}

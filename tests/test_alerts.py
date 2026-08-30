@@ -144,9 +144,40 @@ check("and one with a Z on the end",
            - _dt.timedelta(days=2, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")) == 2)
 check("and a bare date", alert_age_days(_ago(4, "%Y-%m-%d")) in (4, 5),
       str(alert_age_days(_ago(4, "%Y-%m-%d"))))
-check("and epoch seconds",
-      alert_age_days(int((_dt.datetime.now(_dt.timezone.utc)
-                          - _dt.timedelta(days=5, hours=1)).timestamp())) == 5)
+# ---- epoch, which is what the real column holds ---------------------------
+# alert.time is an epoch number, and epoch arrives in more shapes than it has
+# any right to: int, float, Decimal when the column is `numeric`, or the
+# string any of those become on the way through -- in seconds, milliseconds,
+# or microseconds, none of it declared anywhere.
+from decimal import Decimal                                       # noqa: E402
+
+from api.workflow import alert_raised_at                          # noqa: E402
+
+FIVE = int((_dt.datetime.now(_dt.timezone.utc)
+            - _dt.timedelta(days=5, hours=1)).timestamp())
+for label, value in [
+    ("seconds, as an int", FIVE),
+    ("milliseconds", FIVE * 1000),
+    ("microseconds", FIVE * 1000000),
+    ("a string of digits", str(FIVE)),
+    ("a Decimal, from a numeric column", Decimal(FIVE)),
+    ("a float", float(FIVE)),
+    ("a string with a decimal point", str(float(FIVE))),
+]:
+    check(f"epoch as {label} reads as five days old",
+          alert_age_days(value) == 5, str(alert_age_days(value)))
+
+check("and it is shown as a date, not as the number",
+      alert_raised_at(FIVE).startswith("20") and ":" in alert_raised_at(FIVE),
+      alert_raised_at(FIVE))
+check("a timestamp that was already readable is left as it is",
+      alert_raised_at("2026-08-26 09:17:04") == "2026-08-26 09:17:04")
+
+# a number that is not a time must not become one: 1970 in the Raised column
+# looks like a real answer, and is the kind of thing nobody questions
+for not_a_time in (0, 4211, -1, True, "0", "  "):
+    check(f"{not_a_time!r} is not read as a timestamp",
+          alert_age_days(not_a_time) is None, str(alert_age_days(not_a_time)))
 
 # what must NOT happen: a filter hiding an alert because nobody could read its
 # date. An old alert shown is a nuisance; a current one hidden is a fault.
