@@ -99,6 +99,12 @@ def salvage_tool_call(text: str, tool_names):
 
     if not args or "tool" in args or "args" in args:
         return None                             # not an argument object
+    # {"thought": ..., "final": {...}} is the relay's shape for an ANSWER. Read
+    # as an argument bag it becomes a call with none of the arguments the tool
+    # needs, which the tool then rejects for a missing field -- a red row
+    # blaming the CMDB for the model's formatting.
+    if "final" in args or "result" in args:
+        return None
 
     # Otherwise the name is in the prose: "call the `get_device_details`
     # function". Which one it is comes from the ARGUMENTS, not from where the
@@ -118,8 +124,14 @@ def salvage_tool_call(text: str, tool_names):
         fit = len(keys & wanted) - len(keys - wanted) if wanted else 0
         scored.append((fit, position, name))
     best = max(scored)
-    if best[0] <= 0 and len(scored) > 1:
+    # A tool whose schema we KNOW must actually fit. Letting a single named
+    # tool through on a negative score was the hole: one tool mentioned, an
+    # object that shares not one argument name with it, and the call went
+    # anyway. "Only one candidate" is not evidence that the candidate is right.
+    if best[0] <= 0 and _arg_keys(tool_names, best[2]):
         return None                             # nothing fits: do not guess
+    if best[0] <= 0 and len(scored) > 1:
+        return None
     return (best[2], args)
 
 

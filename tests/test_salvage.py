@@ -117,6 +117,35 @@ check("...and is still refused by the allowlist",
       bool(check_command("configure terminal")),
       "the salvage path must not be a way around the guard")
 
+# ---- an ANSWER is not an argument bag -------------------------------------
+# A second run produced "get_device_details()" with a red cross and a pydantic
+# complaint that device_name was missing. The model had answered in the
+# relay's envelope -- {"thought": ..., "final": {}} -- and mentioned the tool
+# in passing. One tool named, an object sharing not one argument with it, and
+# the old rule let it through because there was only one candidate.
+ENVELOPE = ('{"thought": "I need to start the workflow and gather details '
+            'before I can proceed.", "final": {}}\n\n'
+            'Calling get_device_details for EDGE-A1.')
+check("a final-answer envelope is not read as arguments",
+      salvage_tool_call(ENVELOPE, TOOLS) is None,
+      str(salvage_tool_call(ENVELOPE, TOOLS)))
+
+check("nor is a report object that names a tool",
+      salvage_tool_call('{"result": "INCONCLUSIVE", "cause": "the deeper '
+                        'checks with execute_query_on_server found nothing"}',
+                        TOOLS) is None)
+
+# the rule that let it through: one candidate is not evidence of a fit
+check("arguments that share nothing with the tool are not its arguments",
+      salvage_tool_call('{"colour": "blue", "size": 4} -- get_device_details',
+                        TOOLS) is None,
+      str(salvage_tool_call('{"colour": "blue"} get_device_details', TOOLS)))
+check("while arguments that DO fit are still salvaged",
+      salvage_tool_call('calling get_device_details:\n'
+                        '{"device_name": "EDGE-A1"}', TOOLS)
+      == ("get_device_details", {"device_name": "EDGE-A1"}))
+
+
 # ---- announced, and then not done ----------------------------------------
 # The one that wasted a whole run: no JSON anywhere, just a model narrating
 # the step it was about to take. Nothing to salvage -- but "there is nothing

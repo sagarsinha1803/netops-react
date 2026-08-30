@@ -221,6 +221,37 @@ async def _load_tools(client):
     return tools, owner, failed
 
 
+def _usable_call(name: str, args, by_name) -> bool:
+    """Would this salvaged call survive contact with the tool?
+
+    Salvage reads a call out of prose, so its arguments are a reading rather
+    than a promise. Two shapes got through and cost a run each: an argument
+    bag with none of the fields the tool requires -- rejected by the tool for
+    a missing field, which reads on screen as the CMDB failing -- and a
+    command list holding an object instead of a string, which the allowlist
+    then refused five times over. Neither is a call. Ask again instead.
+    """
+    if not isinstance(args, dict) or not args:
+        return False
+    tool = by_name.get(name)
+    schema = getattr(tool, "args", None) if tool is not None else None
+    if isinstance(schema, dict) and schema:
+        required = {k for k, v in schema.items()
+                    if isinstance(v, dict) and v.get("required")}
+        # LangChain does not always mark required-ness; fall back to "shares at
+        # least one argument name", which is what separates a reading from a
+        # guess
+        if required and not required.issubset(set(args)):
+            return False
+        if not set(args) & set(schema):
+            return False
+    for command in commands_of(args):
+        # a command is a line of CLI, not a nested object rendered as one
+        if command.strip().startswith(("{", "[")):
+            return False
+    return True
+
+
 def _call_key(name: str, args: dict) -> str:
     """One string for "this exact question, asked of this exact thing".
 
@@ -387,6 +418,11 @@ async def build_agent(checkpointer=None):
         # through the allowlist and the human gate like any other.
         if not getattr(reply, "tool_calls", None):
             rescued = salvage_tool_call(str(reply.content or ""), by_name)
+            if rescued and not _usable_call(rescued[0], rescued[1], by_name):
+                print(f"[LLM] read a call to {rescued[0]} out of the text, but "
+                      f"its arguments do not fit the tool -- not running it",
+                      file=sys.stderr)
+                rescued = None
             if rescued:
                 name, args = rescued
                 print(f"[LLM] tool call written as text, not called: {name} "
@@ -418,6 +454,8 @@ async def build_agent(checkpointer=None):
                     reply = again
                 else:
                     retry = salvage_tool_call(str(again.content or ""), by_name)
+                    if retry and not _usable_call(retry[0], retry[1], by_name):
+                        retry = None
                     if retry:
                         name, args = retry
                         reply = AIMessage(
